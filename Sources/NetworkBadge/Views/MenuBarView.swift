@@ -11,6 +11,7 @@
 //   - Quit button
 // ---------------------------------------------------------
 
+import ServiceManagement
 import SwiftUI
 
 /// The main popover view shown when the user clicks the menu bar item.
@@ -42,6 +43,11 @@ struct MenuBarView: View {
 
             // ── Recent History ──────────────────────────
             historySection
+
+            Divider()
+
+            // ── Settings ──────────────────────────────
+            settingsSection
 
             Divider()
 
@@ -171,29 +177,25 @@ struct MenuBarView: View {
 
     // MARK: - History
 
-    /// Shows the last few latency measurements
+    /// Shows the last few latency measurements (always exactly 4 rows)
     private var historySection: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        let maxRows = 4
+        let recentSamples = Array(latencyMonitor.samples.prefix(maxRows))
+
+        return VStack(alignment: .leading, spacing: 4) {
             Text("Recent")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
 
-            if latencyMonitor.samples.isEmpty {
-                Text("No measurements yet…")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            } else {
-                // Show last 8 measurements in a compact format
-                let recentSamples = Array(latencyMonitor.samples.prefix(8))
-                ForEach(recentSamples) { sample in
+            ForEach(0..<maxRows, id: \.self) { index in
+                if index < recentSamples.count {
+                    let sample = recentSamples[index]
                     HStack {
-                        // Timestamp
                         Text(formatTime(sample.timestamp))
                             .font(.caption.monospacedDigit())
                             .foregroundColor(.secondary)
                             .frame(width: 60, alignment: .leading)
 
-                        // Latency bar (visual indicator)
                         if sample.wasSuccessful {
                             let quality = LatencyQuality.from(latencyMs: sample.latencyMs)
                             Rectangle()
@@ -211,14 +213,47 @@ struct MenuBarView: View {
 
                         Spacer()
 
-                        // Latency value
                         Text(sample.displayText)
                             .font(.caption.monospacedDigit())
+                            .frame(width: 55, alignment: .trailing)
+                    }
+                } else {
+                    HStack {
+                        Text("--:--:--")
+                            .font(.caption.monospacedDigit())
+                            .foregroundColor(.secondary.opacity(0.4))
+                            .frame(width: 60, alignment: .leading)
+                        Spacer()
+                        Text("--")
+                            .font(.caption.monospacedDigit())
+                            .foregroundColor(.secondary.opacity(0.4))
                             .frame(width: 55, alignment: .trailing)
                     }
                 }
             }
         }
+    }
+
+    // MARK: - Settings
+
+    /// Launch at Login toggle using SMAppService
+    private var settingsSection: some View {
+        Toggle("Launch at Login", isOn: Binding(
+            get: { SMAppService.mainApp.status == .enabled },
+            set: { newValue in
+                do {
+                    if newValue {
+                        try SMAppService.mainApp.register()
+                    } else {
+                        try SMAppService.mainApp.unregister()
+                    }
+                } catch {
+                    print("Failed to update login item: \(error)")
+                }
+            }
+        ))
+        .toggleStyle(.checkbox)
+        .font(.subheadline)
     }
 
     // MARK: - Footer

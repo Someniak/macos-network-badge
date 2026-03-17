@@ -76,6 +76,12 @@ chmod +x "$MACOS_DIR/NetworkBadge"
 # Copy Info.plist (tells macOS about our app)
 cp "Resources/Info.plist" "$CONTENTS_DIR/Info.plist"
 
+# Copy app icon
+if [ -f "Resources/AppIcon.icns" ]; then
+    cp "Resources/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
+    echo -e "${GREEN}App icon bundled!${NC}"
+fi
+
 # ── Step 4: Optional code signing ────────────────────────
 # Code signing is required for:
 #   - App Store distribution

@@ -35,6 +35,10 @@
     <key>LSUIElement</key>
     <true/>
 
+    <!-- App icon (without .icns extension) -->
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+
     <!-- Minimum macOS version -->
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
