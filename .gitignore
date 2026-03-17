@@ -1,0 +1,15 @@
+# Swift / Xcode
+.build/
+build/
+*.xcodeproj
+xcuserdata/
+DerivedData/
+.swiftpm/
+
+# macOS
+.DS_Store
+*.dmg
+
+# IDE
+.vscode/
+.idea/
