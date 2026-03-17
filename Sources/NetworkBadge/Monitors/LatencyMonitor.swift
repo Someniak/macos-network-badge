@@ -37,6 +37,10 @@ final class LatencyMonitor: ObservableObject {
     /// Human-friendly quality rating based on current latency
     @Published var quality: LatencyQuality = .unknown
 
+    /// The quality level before the most recent change
+    /// (used by NotificationManager to detect degradation)
+    @Published var previousQuality: LatencyQuality = .unknown
+
     /// History of recent measurements (newest first, max 20)
     @Published var samples: [LatencySample] = []
 
@@ -183,6 +187,9 @@ final class LatencyMonitor: ObservableObject {
         if samples.count > maxSampleCount {
             samples = Array(samples.prefix(maxSampleCount))
         }
+
+        // Save previous quality before updating (for change detection)
+        previousQuality = quality
 
         // Update current latency
         if sample.wasSuccessful {

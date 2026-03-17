@@ -6,9 +6,10 @@
 // (the icon/text in your menu bar) and wire up the monitors.
 //
 // The app:
-//   1. Shows a small text in the menu bar: "● 42ms"
+//   1. Shows a small colored text in the menu bar: "● 42ms"
 //   2. When clicked, shows a popover with full network details
-//   3. Runs in the background (no dock icon, no window)
+//   3. Sends notifications when quality drops to poor/bad
+//   4. Runs in the background (no dock icon, no window)
 // ---------------------------------------------------------
 
 import SwiftUI
@@ -21,11 +22,13 @@ struct NetworkBadgeApp: App {
     // MARK: - Monitors
 
     /// Watches for network type changes (WiFi, Ethernet, USB, etc.)
-    /// @StateObject keeps this alive for the entire app lifetime
     @StateObject private var networkMonitor = NetworkMonitor()
 
     /// Measures internet latency every few seconds
     @StateObject private var latencyMonitor = LatencyMonitor()
+
+    /// Manages quality-drop notifications
+    @StateObject private var notificationManager = NotificationManager()
 
     // MARK: - App Body
 
@@ -40,7 +43,8 @@ struct NetworkBadgeApp: App {
             // This is the detailed view shown when clicked
             MenuBarView(
                 networkMonitor: networkMonitor,
-                latencyMonitor: latencyMonitor
+                latencyMonitor: latencyMonitor,
+                notificationManager: notificationManager
             )
         } label: {
             // ── Menu Bar Label ──────────────────────────
@@ -56,7 +60,7 @@ struct NetworkBadgeApp: App {
 
     /// The text shown in the menu bar. Kept very short to not
     /// take up too much space. Shows:
-    ///   - "● 42ms" when connected (dot colored by quality)
+    ///   - "● 42ms" when connected (colored by quality)
     ///   - "○ --"   when disconnected
     private var menuBarLabel: some View {
         HStack(spacing: 4) {
@@ -74,10 +78,21 @@ struct NetworkBadgeApp: App {
                     .font(.caption)
             }
         }
+        // Color the entire menu bar label by quality
+        .foregroundColor(latencyMonitor.quality.swiftUIColor)
         // Start monitoring when the app appears
         .onAppear {
             networkMonitor.start()
             latencyMonitor.start()
+            notificationManager.requestPermission()
+        }
+        // Watch for quality changes and send notifications on degradation
+        .onChange(of: latencyMonitor.quality) { oldQuality, newQuality in
+            notificationManager.notifyQualityDrop(
+                from: oldQuality,
+                to: newQuality,
+                latencyMs: latencyMonitor.currentLatencyMs ?? 0
+            )
         }
     }
 }

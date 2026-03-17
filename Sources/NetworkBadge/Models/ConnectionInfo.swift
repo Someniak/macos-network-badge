@@ -7,6 +7,7 @@
 // ---------------------------------------------------------
 
 import Foundation
+import SwiftUI
 
 // MARK: - Connection Type
 
@@ -82,6 +83,59 @@ enum LatencyQuality: String, Equatable, Sendable {
         case .poor:      return "●"
         case .bad:       return "●"
         case .unknown:   return "○"  // hollow = no data
+        }
+    }
+
+    /// SwiftUI Color for this quality level — used in menu bar and popover
+    var swiftUIColor: Color {
+        switch self {
+        case .excellent: return .green
+        case .good:      return .green
+        case .fair:      return .yellow
+        case .poor:      return .orange
+        case .bad:       return .red
+        case .unknown:   return .gray
+        }
+    }
+}
+
+// MARK: - WiFi Signal Quality
+
+/// A human-friendly rating of WiFi signal strength based on RSSI (dBm).
+/// Typical RSSI values range from -30 (very strong) to -90 (very weak).
+enum WiFiSignalQuality: String, Equatable, Sendable {
+    case excellent = "Excellent"  // > -50 dBm
+    case good      = "Good"       // -50 to -60 dBm
+    case fair      = "Fair"       // -60 to -70 dBm
+    case weak      = "Weak"       // < -70 dBm
+
+    /// Determine signal quality from an RSSI value in dBm
+    static func from(rssi: Int) -> WiFiSignalQuality {
+        switch rssi {
+        case (-50)...:   return .excellent
+        case (-60)...:   return .good
+        case (-70)...:   return .fair
+        default:         return .weak
+        }
+    }
+
+    /// SF Symbol name — tiered WiFi icons showing signal strength
+    var symbolName: String {
+        switch self {
+        case .excellent: return "wifi"
+        case .good:      return "wifi"
+        case .fair:      return "wifi.exclamationmark"
+        case .weak:      return "wifi.exclamationmark"
+        }
+    }
+
+    /// SwiftUI Color for this signal quality level
+    var swiftUIColor: Color {
+        switch self {
+        case .excellent: return .green
+        case .good:      return .green
+        case .fair:      return .yellow
+        case .weak:      return .red
         }
     }
 }

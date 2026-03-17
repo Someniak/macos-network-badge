@@ -8,6 +8,7 @@
 //   - ConnectionSnapshot menu bar text generation
 // ---------------------------------------------------------
 
+import SwiftUI
 import XCTest
 @testable import NetworkBadge
 
@@ -152,5 +153,67 @@ final class ConnectionInfoTests: XCTestCase {
         XCTAssertFalse(snapshot.isConnected)
         XCTAssertNil(snapshot.currentLatencyMs)
         XCTAssertNil(snapshot.wifiSSID)
+    }
+
+    // MARK: - LatencyQuality SwiftUI Color Tests
+
+    /// Every quality level should return a SwiftUI Color
+    func testQualitySwiftUIColors() {
+        XCTAssertEqual(LatencyQuality.excellent.swiftUIColor, Color.green)
+        XCTAssertEqual(LatencyQuality.good.swiftUIColor, Color.green)
+        XCTAssertEqual(LatencyQuality.fair.swiftUIColor, Color.yellow)
+        XCTAssertEqual(LatencyQuality.poor.swiftUIColor, Color.orange)
+        XCTAssertEqual(LatencyQuality.bad.swiftUIColor, Color.red)
+        XCTAssertEqual(LatencyQuality.unknown.swiftUIColor, Color.gray)
+    }
+
+    // MARK: - WiFiSignalQuality Tests
+
+    /// Verify RSSI values map to correct signal quality levels
+    func testWiFiSignalQualityThresholds() {
+        // Excellent: > -50 dBm
+        XCTAssertEqual(WiFiSignalQuality.from(rssi: -30), .excellent)
+        XCTAssertEqual(WiFiSignalQuality.from(rssi: -49), .excellent)
+
+        // Good: -50 to -60 dBm
+        XCTAssertEqual(WiFiSignalQuality.from(rssi: -50), .good)
+        XCTAssertEqual(WiFiSignalQuality.from(rssi: -59), .good)
+
+        // Fair: -60 to -70 dBm
+        XCTAssertEqual(WiFiSignalQuality.from(rssi: -60), .fair)
+        XCTAssertEqual(WiFiSignalQuality.from(rssi: -69), .fair)
+
+        // Weak: < -70 dBm
+        XCTAssertEqual(WiFiSignalQuality.from(rssi: -71), .weak)
+        XCTAssertEqual(WiFiSignalQuality.from(rssi: -90), .weak)
+    }
+
+    /// WiFi signal quality should have SF Symbol names
+    func testWiFiSignalQualitySymbols() {
+        let allQualities: [WiFiSignalQuality] = [.excellent, .good, .fair, .weak]
+        for quality in allQualities {
+            XCTAssertFalse(
+                quality.symbolName.isEmpty,
+                "\(quality.rawValue) should have a symbol name"
+            )
+        }
+    }
+
+    /// WiFi signal quality should have SwiftUI colors
+    func testWiFiSignalQualityColors() {
+        XCTAssertEqual(WiFiSignalQuality.excellent.swiftUIColor, Color.green)
+        XCTAssertEqual(WiFiSignalQuality.good.swiftUIColor, Color.green)
+        XCTAssertEqual(WiFiSignalQuality.fair.swiftUIColor, Color.yellow)
+        XCTAssertEqual(WiFiSignalQuality.weak.swiftUIColor, Color.red)
+    }
+
+    /// Edge case: very strong signal
+    func testVeryStrongWiFiSignal() {
+        XCTAssertEqual(WiFiSignalQuality.from(rssi: -10), .excellent)
+    }
+
+    /// Edge case: very weak signal
+    func testVeryWeakWiFiSignal() {
+        XCTAssertEqual(WiFiSignalQuality.from(rssi: -100), .weak)
     }
 }

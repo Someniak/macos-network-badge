@@ -4,10 +4,11 @@
 //
 // This view shows all network details in a clean popover:
 //   - Connection type with icon (WiFi, Ethernet, USB, etc.)
-//   - WiFi network name (SSID) if applicable
+//   - WiFi network name (SSID) and signal strength
 //   - Current latency (big and prominent)
 //   - Average latency and quality indicator
-//   - Recent measurement history
+//   - Sparkline chart of recent measurements
+//   - Settings (Launch at Login, Alert on Poor Connection)
 //   - Quit button
 // ---------------------------------------------------------
 
@@ -17,11 +18,14 @@ import SwiftUI
 /// The main popover view shown when the user clicks the menu bar item.
 struct MenuBarView: View {
 
-    /// The network monitor — tells us connection type, SSID, etc.
+    /// The network monitor — tells us connection type, SSID, signal, etc.
     @ObservedObject var networkMonitor: NetworkMonitor
 
     /// The latency monitor — tells us ping times, quality, etc.
     @ObservedObject var latencyMonitor: LatencyMonitor
+
+    /// The notification manager — controls quality drop alerts
+    @ObservedObject var notificationManager: NotificationManager
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -41,8 +45,8 @@ struct MenuBarView: View {
 
             Divider()
 
-            // ── Recent History ──────────────────────────
-            historySection
+            // ── Sparkline Chart ─────────────────────────
+            sparklineSection
 
             Divider()
 
@@ -73,7 +77,7 @@ struct MenuBarView: View {
 
     // MARK: - Connection Info
 
-    /// Shows what type of network you're on and the SSID if WiFi
+    /// Shows what type of network you're on, SSID, and signal strength
     private var connectionSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             // Connection type with icon
@@ -97,6 +101,22 @@ struct MenuBarView: View {
                         .foregroundColor(.secondary)
                     Text(ssid)
                         .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            // WiFi signal strength (only shown when on WiFi with RSSI data)
+            if let rssi = networkMonitor.wifiRSSI {
+                let signalQuality = WiFiSignalQuality.from(rssi: rssi)
+                HStack(spacing: 8) {
+                    Image(systemName: signalQuality.symbolName)
+                        .frame(width: 20)
+                        .foregroundColor(signalQuality.swiftUIColor)
+                    Text("\(rssi) dBm")
+                        .font(.subheadline)
+                    Spacer()
+                    Text(signalQuality.rawValue)
+                        .font(.caption)
                         .foregroundColor(.secondary)
                 }
             }
@@ -131,7 +151,7 @@ struct MenuBarView: View {
                 if let latency = latencyMonitor.currentLatencyMs {
                     Text("\(Int(latency)) ms")
                         .font(.title2.monospacedDigit().bold())
-                        .foregroundColor(colorForQuality(latencyMonitor.quality))
+                        .foregroundColor(latencyMonitor.quality.swiftUIColor)
                 } else {
                     Text("--")
                         .font(.title2.bold())
@@ -150,10 +170,10 @@ struct MenuBarView: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 2)
                     .background(
-                        colorForQuality(latencyMonitor.quality).opacity(0.2)
+                        latencyMonitor.quality.swiftUIColor.opacity(0.2)
                     )
                     .cornerRadius(4)
-                    .foregroundColor(colorForQuality(latencyMonitor.quality))
+                    .foregroundColor(latencyMonitor.quality.swiftUIColor)
             }
 
             // Average latency
@@ -175,85 +195,46 @@ struct MenuBarView: View {
         }
     }
 
-    // MARK: - History
+    // MARK: - Sparkline Chart
 
-    /// Shows the last few latency measurements (always exactly 4 rows)
-    private var historySection: some View {
-        let maxRows = 4
-        let recentSamples = Array(latencyMonitor.samples.prefix(maxRows))
-
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("Recent")
+    /// Shows a mini line chart of recent latency measurements
+    private var sparklineSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("History")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
 
-            ForEach(0..<maxRows, id: \.self) { index in
-                if index < recentSamples.count {
-                    let sample = recentSamples[index]
-                    HStack {
-                        Text(formatTime(sample.timestamp))
-                            .font(.caption.monospacedDigit())
-                            .foregroundColor(.secondary)
-                            .frame(width: 60, alignment: .leading)
-
-                        if sample.wasSuccessful {
-                            let quality = LatencyQuality.from(latencyMs: sample.latencyMs)
-                            Rectangle()
-                                .fill(colorForQuality(quality))
-                                .frame(
-                                    width: min(CGFloat(sample.latencyMs) / 2.0, 120),
-                                    height: 4
-                                )
-                                .cornerRadius(2)
-                        } else {
-                            Text("✕")
-                                .font(.caption)
-                                .foregroundColor(.red)
-                        }
-
-                        Spacer()
-
-                        Text(sample.displayText)
-                            .font(.caption.monospacedDigit())
-                            .frame(width: 55, alignment: .trailing)
-                    }
-                } else {
-                    HStack {
-                        Text("--:--:--")
-                            .font(.caption.monospacedDigit())
-                            .foregroundColor(.secondary.opacity(0.4))
-                            .frame(width: 60, alignment: .leading)
-                        Spacer()
-                        Text("--")
-                            .font(.caption.monospacedDigit())
-                            .foregroundColor(.secondary.opacity(0.4))
-                            .frame(width: 55, alignment: .trailing)
-                    }
-                }
-            }
+            SparklineView(samples: latencyMonitor.samples)
+                .frame(height: 60)
         }
     }
 
     // MARK: - Settings
 
-    /// Launch at Login toggle using SMAppService
+    /// Launch at Login toggle and notification toggle
     private var settingsSection: some View {
-        Toggle("Launch at Login", isOn: Binding(
-            get: { SMAppService.mainApp.status == .enabled },
-            set: { newValue in
-                do {
-                    if newValue {
-                        try SMAppService.mainApp.register()
-                    } else {
-                        try SMAppService.mainApp.unregister()
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Launch at Login", isOn: Binding(
+                get: { SMAppService.mainApp.status == .enabled },
+                set: { newValue in
+                    do {
+                        if newValue {
+                            try SMAppService.mainApp.register()
+                        } else {
+                            try SMAppService.mainApp.unregister()
+                        }
+                    } catch {
+                        print("Failed to update login item: \(error)")
                     }
-                } catch {
-                    print("Failed to update login item: \(error)")
                 }
-            }
-        ))
-        .toggleStyle(.checkbox)
-        .font(.subheadline)
+            ))
+            .toggleStyle(.checkbox)
+            .font(.subheadline)
+
+            Toggle("Alert on Poor Connection", isOn: $notificationManager.notificationsEnabled)
+                .toggleStyle(.checkbox)
+                .font(.subheadline)
+        }
     }
 
     // MARK: - Footer
@@ -266,32 +247,10 @@ struct MenuBarView: View {
                 .foregroundColor(.secondary)
             Spacer()
             Button("Quit") {
-                // NSApplication.shared.terminate sends the app a quit message
                 NSApplication.shared.terminate(nil)
             }
             .buttonStyle(.plain)
             .foregroundColor(.red)
         }
-    }
-
-    // MARK: - Helpers
-
-    /// Maps a LatencyQuality to a SwiftUI Color
-    private func colorForQuality(_ quality: LatencyQuality) -> Color {
-        switch quality {
-        case .excellent: return .green
-        case .good:      return .green
-        case .fair:      return .yellow
-        case .poor:      return .orange
-        case .bad:       return .red
-        case .unknown:   return .gray
-        }
-    }
-
-    /// Formats a timestamp as "HH:mm:ss" (e.g. "14:32:05")
-    private func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
-        return formatter.string(from: date)
     }
 }

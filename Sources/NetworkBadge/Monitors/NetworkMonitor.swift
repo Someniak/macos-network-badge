@@ -40,6 +40,10 @@ final class NetworkMonitor: ObservableObject {
     /// Will be nil when not on WiFi.
     @Published var wifiSSID: String? = nil
 
+    /// WiFi signal strength in dBm (nil when not on WiFi)
+    /// Typical values: -30 (strong) to -90 (very weak)
+    @Published var wifiRSSI: Int? = nil
+
     /// Whether we have any network connection at all
     @Published var isConnected: Bool = false
 
@@ -92,6 +96,7 @@ final class NetworkMonitor: ObservableObject {
             connectionType = .disconnected
             interfaceName = ""
             wifiSSID = nil
+            wifiRSSI = nil
             return
         }
 
@@ -103,6 +108,7 @@ final class NetworkMonitor: ObservableObject {
             if NetworkInterfaceHelper.isUSBTethering(interfaceName: activeInterface.name) {
                 connectionType = .usbTethering
                 wifiSSID = nil
+                wifiRSSI = nil
                 return
             }
 
@@ -111,28 +117,34 @@ final class NetworkMonitor: ObservableObject {
             case .wifi:
                 connectionType = .wifi
                 wifiSSID = readCurrentWiFiSSID()
+                wifiRSSI = readCurrentWiFiRSSI()
 
             case .wiredEthernet:
                 connectionType = .ethernet
                 wifiSSID = nil
+                wifiRSSI = nil
 
             case .cellular:
                 connectionType = .cellular
                 wifiSSID = nil
+                wifiRSSI = nil
 
             case .loopback:
                 connectionType = .loopback
                 wifiSSID = nil
+                wifiRSSI = nil
 
             default:
                 connectionType = .unknown
                 wifiSSID = nil
+                wifiRSSI = nil
             }
         } else {
             // Connected but no interface info available
             connectionType = .unknown
             interfaceName = ""
             wifiSSID = nil
+            wifiRSSI = nil
         }
     }
 
@@ -158,6 +170,30 @@ final class NetworkMonitor: ObservableObject {
 
         // .ssid() returns the name of the connected WiFi network
         return wifiInterface.ssid()
+        #else
+        return nil
+        #endif
+    }
+
+    // MARK: - WiFi RSSI Reading
+
+    /// Reads the current WiFi signal strength (RSSI) in dBm using CoreWLAN.
+    ///
+    /// Typical values:
+    ///   - -30 to -50 dBm: Excellent signal
+    ///   - -50 to -60 dBm: Good signal
+    ///   - -60 to -70 dBm: Fair signal
+    ///   - Below -70 dBm: Weak signal
+    private func readCurrentWiFiRSSI() -> Int? {
+        #if canImport(CoreWLAN)
+        let wifiClient = CWWiFiClient.shared()
+        guard let wifiInterface = wifiClient.interface() else {
+            return nil
+        }
+        // rssiValue() returns the current signal strength in dBm
+        let rssi = wifiInterface.rssiValue()
+        // rssiValue() returns 0 if not associated with a network
+        return rssi == 0 ? nil : rssi
         #else
         return nil
         #endif
