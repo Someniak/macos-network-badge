@@ -4,6 +4,8 @@ A native macOS menu bar app that shows **live internet latency** and **connectio
 
 ## Screenshots
 <img width="297" height="277" alt="image" src="https://github.com/user-attachments/assets/e5276b4b-1d09-4c10-8d96-387403383ed4" />
+<img width="298" height="274" alt="image" src="https://github.com/user-attachments/assets/d6b2d4d8-8bed-48af-aca4-416b32e277da" />
+
 
 ## What It Does
 
