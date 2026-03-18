@@ -113,9 +113,32 @@ final class QualityRecordTests: XCTestCase {
             connectionType: "WiFi",
             wifiSSID: nil,
             wifiRSSI: nil,
-            interfaceName: "en0"
+            interfaceName: "en0",
+            locationSource: "CoreLocation"
         )
         // Should fall back to .unknown when the string doesn't match
         XCTAssertEqual(record.qualityLevel, .unknown)
+    }
+
+    /// Factory method should accept different location sources
+    func testLocationSourceFromFactory() {
+        let ipRecord = QualityRecord.from(
+            latitude: 50.0, longitude: 4.0, locationAccuracy: 50000,
+            latencyMs: 42, wasSuccessful: true,
+            connectionType: .wifi, wifiSSID: nil, wifiRSSI: nil,
+            interfaceName: "en0",
+            locationSource: .ipGeolocation
+        )
+        XCTAssertEqual(ipRecord.locationSource, "IP Geolocation")
+        XCTAssertEqual(ipRecord.locationSourceLevel, .ipGeolocation)
+
+        let defaultRecord = QualityRecord.from(
+            latitude: 50.0, longitude: 4.0, locationAccuracy: 10,
+            latencyMs: 42, wasSuccessful: true,
+            connectionType: .wifi, wifiSSID: nil, wifiRSSI: nil,
+            interfaceName: "en0"
+        )
+        XCTAssertEqual(defaultRecord.locationSource, "CoreLocation")
+        XCTAssertEqual(defaultRecord.locationSourceLevel, .coreLocation)
     }
 }

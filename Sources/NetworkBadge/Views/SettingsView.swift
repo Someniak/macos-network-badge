@@ -103,6 +103,26 @@ struct SettingsView: View {
                         in: 1.5...4.0,
                         step: 0.5
                     )
+
+                    Divider()
+
+                    Text("Location Intelligence")
+                        .font(.caption.bold())
+                        .foregroundColor(.secondary)
+
+                    Stepper("Max accuracy: \(Int(locationMonitor.intelligence.accuracyThreshold)) m",
+                            value: $locationMonitor.intelligence.accuracyThreshold,
+                            in: 200...5000, step: 200)
+
+                    Toggle("IP geolocation fallback",
+                           isOn: $locationMonitor.intelligence.ipGeolocationEnabled)
+
+                    Stepper("Interpolation gap: \(Int(locationMonitor.intelligence.maxInterpolationGap / 60)) min",
+                            value: $locationMonitor.intelligence.maxInterpolationGap,
+                            in: 60...600, step: 60)
+
+                    Toggle("Show quality trail",
+                           isOn: $locationMonitor.intelligence.showTrail)
                 }
             }
         }

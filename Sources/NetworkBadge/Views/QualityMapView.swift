@@ -1,19 +1,17 @@
 // ---------------------------------------------------------
 // QualityMapView.swift — Map showing network quality over GPS
 //
-// Displays a MapKit map with colored dots at each location
-// where a network quality measurement was recorded. Colors
-// match the app's quality scheme:
+// Displays a MapKit map with an Uber-style colored trail
+// showing the travel path, with each segment colored by
+// network quality:
 //   - Green = Excellent/Good
 //   - Yellow = Fair
 //   - Orange = Poor
 //   - Red = Bad
 //
-// The map uses cached tiles for offline viewing and supports
-// filtering by time range and quality level.
-//
-// Uses the macOS 13-compatible Map API (coordinateRegion +
-// annotationItems) to match the project's deployment target.
+// Features a live pulsing position marker with bearing arrow,
+// quality dots at measurement points, and trail rendering
+// via MKMapView (NSViewRepresentable) for proper polylines.
 // ---------------------------------------------------------
 
 import MapKit
@@ -37,8 +35,14 @@ struct QualityMapView: View {
     let currentLatitude: Double?
     let currentLongitude: Double?
 
+    /// Current bearing in degrees (from LocationIntelligence)
+    let currentBearing: Double
+
     /// Records to display on the map
     @State private var records: [QualityRecord] = []
+
+    /// Trail segments for the quality polyline
+    @State private var segments: [TrailSegment] = []
 
     /// Map region — controls what's visible on the map.
     /// Uses coordinateRegion binding (macOS 13-compatible).
@@ -75,24 +79,20 @@ struct QualityMapView: View {
 
     // MARK: - Map Content
 
-    /// The map with quality annotations overlaid.
-    /// Uses the macOS 13-compatible Map(coordinateRegion:annotationItems:) API.
+    /// The map with quality trail, annotations, and live marker.
+    /// Uses TrailMapView (MKMapView via NSViewRepresentable) for
+    /// proper polyline rendering with per-segment colors.
     @ViewBuilder
     private var mapContent: some View {
-        Map(coordinateRegion: $region, annotationItems: records) { record in
-            // Each record is shown as a colored circle at its GPS coordinates
-            MapAnnotation(
-                coordinate: CLLocationCoordinate2D(
-                    latitude: record.latitude,
-                    longitude: record.longitude
-                )
-            ) {
-                qualityDot(for: record)
-                    .onTapGesture {
-                        selectedRecord = record
-                    }
-            }
-        }
+        TrailMapView(
+            records: records,
+            segments: segments,
+            currentLatitude: currentLatitude,
+            currentLongitude: currentLongitude,
+            currentBearing: currentBearing,
+            region: $region,
+            selectedRecord: $selectedRecord
+        )
         .overlay(alignment: .topTrailing) {
             // Record count badge
             recordCountBadge
@@ -106,26 +106,6 @@ struct QualityMapView: View {
                     .transition(.move(edge: .bottom))
             }
         }
-    }
-
-    // MARK: - Quality Dot
-
-    /// A colored circle representing a quality measurement on the map.
-    /// Size indicates whether measurement was successful.
-    private func qualityDot(for record: QualityRecord) -> some View {
-        Circle()
-            .fill(record.qualityLevel.swiftUIColor.opacity(0.8))
-            .frame(width: dotSize(for: record), height: dotSize(for: record))
-            .overlay(
-                Circle()
-                    .stroke(record.qualityLevel.swiftUIColor, lineWidth: 1)
-            )
-            .shadow(color: record.qualityLevel.swiftUIColor.opacity(0.4), radius: 3)
-    }
-
-    /// Dot size: successful measurements are larger than failed ones
-    private func dotSize(for record: QualityRecord) -> CGFloat {
-        record.wasSuccessful ? 12 : 8
     }
 
     // MARK: - Record Count Badge
@@ -237,9 +217,10 @@ struct QualityMapView: View {
                     .foregroundColor(.secondary)
             }
 
-            // GPS coordinates — useful for debugging and analysis
-            Text(String(format: "%.5f, %.5f (±%.0fm)",
-                        record.latitude, record.longitude, record.locationAccuracy))
+            // GPS coordinates and location source
+            Text(String(format: "%.5f, %.5f (±%.0fm) — %@",
+                        record.latitude, record.longitude,
+                        record.locationAccuracy, record.locationSource))
                 .font(.caption2)
                 .foregroundColor(.secondary.opacity(0.7))
         }
@@ -272,7 +253,14 @@ struct QualityMapView: View {
             }
         }
 
-        records = filtered
+        // Build trail segments from all filtered records (including interpolated)
+        segments = QualityTrailBuilder.buildTrail(from: filtered)
+
+        // Filter out records with no location for the annotation layer
+        records = filtered.filter { record in
+            record.locationSourceLevel != .none &&
+            (record.latitude != 0 || record.longitude != 0)
+        }
         updateRegionIfNeeded()
     }
 

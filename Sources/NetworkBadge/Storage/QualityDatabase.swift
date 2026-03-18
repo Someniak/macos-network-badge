@@ -49,6 +49,7 @@ final class QualityDatabase {
         openDatabase()
         createTableIfNeeded()
         createIndicesIfNeeded()
+        migrateSchemaIfNeeded()
     }
 
     deinit {
@@ -113,6 +114,12 @@ final class QualityDatabase {
             """)
     }
 
+    private func migrateSchemaIfNeeded() {
+        // Add location_source column if it doesn't exist.
+        // ALTER TABLE will error if column already exists — execute() logs and ignores.
+        execute("ALTER TABLE quality_records ADD COLUMN location_source TEXT NOT NULL DEFAULT 'CoreLocation'")
+    }
+
     // MARK: - Insert
 
     /// Inserts a quality record into the database. Never fails silently.
@@ -121,8 +128,8 @@ final class QualityDatabase {
             INSERT INTO quality_records (
                 id, timestamp, latitude, longitude, location_accuracy,
                 latency_ms, was_successful, quality, connection_type,
-                wifi_ssid, wifi_rssi, interface_name
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                wifi_ssid, wifi_rssi, interface_name, location_source
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
 
         var stmt: OpaquePointer?
@@ -155,9 +162,38 @@ final class QualityDatabase {
         }
 
         sqlite3_bind_text(stmt, 12, record.interfaceName, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_text(stmt, 13, record.locationSource, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
 
         if sqlite3_step(stmt) != SQLITE_DONE {
             print("[QualityDatabase] Failed to insert record: \(errorMessage)")
+        }
+    }
+
+    // MARK: - Update
+
+    /// Updates the location fields of an existing record (used by backpropagation).
+    func update(id: UUID, latitude: Double, longitude: Double, locationAccuracy: Double, locationSource: String) {
+        let sql = """
+            UPDATE quality_records
+            SET latitude = ?, longitude = ?, location_accuracy = ?, location_source = ?
+            WHERE id = ?
+            """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            print("[QualityDatabase] Failed to prepare update: \(errorMessage)")
+            return
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_double(stmt, 1, latitude)
+        sqlite3_bind_double(stmt, 2, longitude)
+        sqlite3_bind_double(stmt, 3, locationAccuracy)
+        sqlite3_bind_text(stmt, 4, locationSource, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_text(stmt, 5, id.uuidString, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+
+        if sqlite3_step(stmt) != SQLITE_DONE {
+            print("[QualityDatabase] Failed to update record: \(errorMessage)")
         }
     }
 
@@ -265,6 +301,10 @@ final class QualityDatabase {
 
             let interfaceName = String(cString: sqlite3_column_text(stmt, 11))
 
+            let locationSource: String = sqlite3_column_type(stmt, 12) != SQLITE_NULL
+                ? String(cString: sqlite3_column_text(stmt, 12))
+                : "CoreLocation"
+
             let record = QualityRecord(
                 id: UUID(uuidString: idStr) ?? UUID(),
                 timestamp: Date(timeIntervalSince1970: timestamp),
@@ -277,7 +317,8 @@ final class QualityDatabase {
                 connectionType: connectionType,
                 wifiSSID: wifiSSID,
                 wifiRSSI: wifiRSSI,
-                interfaceName: interfaceName
+                interfaceName: interfaceName,
+                locationSource: locationSource
             )
 
             records.append(record)

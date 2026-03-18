@@ -49,9 +49,17 @@ struct QualityRecord: Identifiable, Equatable, Sendable {
     /// System network interface name (e.g. "en0")
     let interfaceName: String
 
+    /// How the GPS coordinates were determined (CoreLocation, IP, Interpolated, etc.)
+    let locationSource: String
+
     /// Derived quality color for map display
     var qualityLevel: LatencyQuality {
         LatencyQuality(rawValue: quality) ?? .unknown
+    }
+
+    /// Derived location source enum
+    var locationSourceLevel: LocationSource {
+        LocationSource(rawValue: locationSource) ?? .coreLocation
     }
 
     /// Create a record from current monitor state and GPS coordinates
@@ -64,7 +72,8 @@ struct QualityRecord: Identifiable, Equatable, Sendable {
         connectionType: ConnectionType,
         wifiSSID: String?,
         wifiRSSI: Int?,
-        interfaceName: String
+        interfaceName: String,
+        locationSource: LocationSource = .coreLocation
     ) -> QualityRecord {
         let quality: LatencyQuality = wasSuccessful
             ? LatencyQuality.from(latencyMs: latencyMs)
@@ -82,7 +91,8 @@ struct QualityRecord: Identifiable, Equatable, Sendable {
             connectionType: connectionType.rawValue,
             wifiSSID: wifiSSID,
             wifiRSSI: wifiRSSI,
-            interfaceName: interfaceName
+            interfaceName: interfaceName,
+            locationSource: locationSource.rawValue
         )
     }
 }

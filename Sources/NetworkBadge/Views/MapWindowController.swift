@@ -69,7 +69,8 @@ final class MapWindowController: ObservableObject {
             database: database,
             tileCache: tileCache,
             currentLatitude: locationMonitor?.latitude,
-            currentLongitude: locationMonitor?.longitude
+            currentLongitude: locationMonitor?.longitude,
+            currentBearing: locationMonitor?.intelligence.currentBearing ?? 0
         )
 
         // Wrap in an NSHostingController for AppKit integration

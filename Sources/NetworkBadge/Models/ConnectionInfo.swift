@@ -140,6 +140,18 @@ enum WiFiSignalQuality: String, Equatable, Sendable {
     }
 }
 
+// MARK: - Location Source
+
+/// Describes how a record's GPS coordinates were determined.
+/// Used to visually differentiate location quality on the map.
+enum LocationSource: String, Equatable, Sendable {
+    case coreLocation  = "CoreLocation"     // Good GPS/Wi-Fi fix (accuracy <= 200m)
+    case lowAccuracy   = "Low Accuracy"     // CoreLocation but accuracy > 200m
+    case ipGeolocation = "IP Geolocation"   // Fallback from IP geolocation API
+    case interpolated  = "Interpolated"     // Backpropagated from speed estimation
+    case none          = "None"             // No location available
+}
+
 // MARK: - Latency Sample
 
 /// A single latency measurement at a point in time.

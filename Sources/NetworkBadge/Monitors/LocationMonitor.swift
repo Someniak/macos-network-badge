@@ -58,6 +58,9 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     /// The database to write quality records to
     private let database: QualityDatabase
 
+    /// Smart location processing (Kalman filter, backpropagation, outlier detection)
+    let intelligence: LocationIntelligence
+
     /// References to other monitors for reading current state
     private weak var networkMonitor: NetworkMonitor?
     private weak var latencyMonitor: LatencyMonitor?
@@ -101,6 +104,7 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
 
     init(database: QualityDatabase) {
         self.database = database
+        self.intelligence = LocationIntelligence(database: database)
         super.init()
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
@@ -135,6 +139,8 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     func stop() {
         locationManager.stopUpdatingLocation()
         cancelStationaryTimer()
+        intelligence.flushOnStop()
+        intelligence.resetKalman()
         currentLocation = nil
         isTracking = false
     }
@@ -200,21 +206,38 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     }
 
     /// Records a quality measurement if the user has moved enough.
-    private func recordIfNeeded(at location: CLLocation) {
-        // Skip if location accuracy is too poor (e.g. > 200m)
-        guard location.horizontalAccuracy >= 0 && location.horizontalAccuracy < 200 else {
+    /// Uses LocationIntelligence for Kalman smoothing, outlier detection,
+    /// and backpropagation when GPS is unavailable.
+    private func recordIfNeeded(at rawLocation: CLLocation) {
+        // 1. Kalman smooth the raw reading
+        let location = intelligence.kalmanSmooth(rawLocation)
+
+        // 2. Outlier detection — reject teleportation
+        guard let validLocation = intelligence.validateLocation(location) else {
             return
         }
 
-        // Check minimum distance from last recording
+        // 3. Check accuracy — classify source
+        let (accept, source) = intelligence.shouldRecord(location: validLocation)
+
+        if !accept {
+            // Location too inaccurate — buffer for backpropagation and try IP fallback
+            bufferLatencyOnlyRecord()
+            if intelligence.ipGeolocationEnabled {
+                Task { [weak self] in await self?.recordWithIPFallback() }
+            }
+            return
+        }
+
+        // 4. Check minimum distance from last recording
         if let lastLocation = lastRecordedLocation {
-            let distance = location.distance(from: lastLocation)
+            let distance = validLocation.distance(from: lastLocation)
             if distance < minimumDistance {
                 return
             }
         }
 
-        // Check minimum time interval
+        // 5. Check minimum time interval
         if let lastTime = lastRecordedTime {
             let elapsed = Date().timeIntervalSince(lastTime)
             if elapsed < minimumInterval {
@@ -222,7 +245,7 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
             }
         }
 
-        // We need current network data
+        // 6. We need current network data
         guard let network = networkMonitor, let latency = latencyMonitor else {
             return
         }
@@ -232,26 +255,30 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
             return
         }
 
-        // Get the most recent sample
         let latestSample = latency.samples.first
 
         let record = QualityRecord.from(
-            latitude: location.coordinate.latitude,
-            longitude: location.coordinate.longitude,
-            locationAccuracy: location.horizontalAccuracy,
+            latitude: validLocation.coordinate.latitude,
+            longitude: validLocation.coordinate.longitude,
+            locationAccuracy: validLocation.horizontalAccuracy,
             latencyMs: latestSample?.latencyMs ?? 0,
             wasSuccessful: latestSample?.wasSuccessful ?? false,
             connectionType: network.connectionType,
             wifiSSID: network.wifiSSID,
             wifiRSSI: network.wifiRSSI,
-            interfaceName: network.interfaceName
+            interfaceName: network.interfaceName,
+            locationSource: source
         )
 
-        // Write to database (off main thread is fine — SQLite handles concurrency)
+        // Write to database
         database.insert(record)
 
+        // Backpropagate any pending records now that we have a GPS fix
+        intelligence.backpropagate(newLocation: validLocation)
+        intelligence.recordAnchor(validLocation)
+
         // Update tracking state
-        lastRecordedLocation = location
+        lastRecordedLocation = validLocation
         lastRecordedTime = Date()
 
         DispatchQueue.main.async { [weak self] in
@@ -259,6 +286,69 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
             self.sessionRecordCount += 1
             self.currentStationaryInterval = self.minimumInterval
             self.scheduleStationaryPoll()
+        }
+    }
+
+    /// Buffer a latency-only record with no location (for later backpropagation).
+    private func bufferLatencyOnlyRecord() {
+        guard let network = networkMonitor, let latency = latencyMonitor else { return }
+        guard latency.samples.count > 0 else { return }
+
+        // Check minimum time interval to avoid spamming
+        if let lastTime = lastRecordedTime {
+            let elapsed = Date().timeIntervalSince(lastTime)
+            if elapsed < minimumInterval { return }
+        }
+
+        let latestSample = latency.samples.first
+
+        let record = QualityRecord.from(
+            latitude: 0,
+            longitude: 0,
+            locationAccuracy: -1,
+            latencyMs: latestSample?.latencyMs ?? 0,
+            wasSuccessful: latestSample?.wasSuccessful ?? false,
+            connectionType: network.connectionType,
+            wifiSSID: network.wifiSSID,
+            wifiRSSI: network.wifiRSSI,
+            interfaceName: network.interfaceName,
+            locationSource: .none
+        )
+
+        database.insert(record)
+        intelligence.bufferRecord(record)
+        lastRecordedTime = Date()
+
+        DispatchQueue.main.async { [weak self] in
+            self?.sessionRecordCount += 1
+        }
+    }
+
+    /// Try IP geolocation as a fallback when CoreLocation fails.
+    private func recordWithIPFallback() async {
+        guard let coords = await intelligence.fetchIPGeolocation() else { return }
+        guard let network = networkMonitor, let latency = latencyMonitor else { return }
+        guard latency.samples.count > 0 else { return }
+
+        let latestSample = latency.samples.first
+
+        let record = QualityRecord.from(
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            locationAccuracy: 50000,  // ~50km city-level accuracy
+            latencyMs: latestSample?.latencyMs ?? 0,
+            wasSuccessful: latestSample?.wasSuccessful ?? false,
+            connectionType: network.connectionType,
+            wifiSSID: network.wifiSSID,
+            wifiRSSI: network.wifiRSSI,
+            interfaceName: network.interfaceName,
+            locationSource: .ipGeolocation
+        )
+
+        database.insert(record)
+
+        DispatchQueue.main.async { [weak self] in
+            self?.sessionRecordCount += 1
         }
     }
 
@@ -280,8 +370,22 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     }
 
     private func performStationaryRecord() {
-        guard isTracking, let location = currentLocation else { return }
-        guard location.horizontalAccuracy >= 0 && location.horizontalAccuracy < 200 else { return }
+        guard isTracking, let rawLocation = currentLocation else { return }
+
+        let location = intelligence.kalmanSmooth(rawLocation)
+        let (accept, source) = intelligence.shouldRecord(location: location)
+
+        guard accept else {
+            // Stationary but bad accuracy — buffer for backpropagation
+            bufferLatencyOnlyRecord()
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.currentStationaryInterval *= self.stationaryMultiplier
+                self.scheduleStationaryPoll()
+            }
+            return
+        }
+
         guard let network = networkMonitor, let latency = latencyMonitor else { return }
         guard latency.samples.count > 0 else { return }
 
@@ -295,9 +399,11 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
             connectionType: network.connectionType,
             wifiSSID: network.wifiSSID,
             wifiRSSI: network.wifiRSSI,
-            interfaceName: network.interfaceName
+            interfaceName: network.interfaceName,
+            locationSource: source
         )
         database.insert(record)
+        intelligence.recordAnchor(location)
         lastRecordedLocation = location
         lastRecordedTime = Date()
 

@@ -25,7 +25,8 @@ final class QualityDatabaseTests: XCTestCase {
         wasSuccessful: Bool = true,
         quality: String = "Good",
         connectionType: String = "WiFi",
-        timestamp: Date = Date()
+        timestamp: Date = Date(),
+        locationSource: String = "CoreLocation"
     ) -> QualityRecord {
         return QualityRecord(
             id: UUID(),
@@ -39,7 +40,8 @@ final class QualityDatabaseTests: XCTestCase {
             connectionType: connectionType,
             wifiSSID: "TestNetwork",
             wifiRSSI: -55,
-            interfaceName: "en0"
+            interfaceName: "en0",
+            locationSource: locationSource
         )
     }
 
@@ -103,7 +105,8 @@ final class QualityDatabaseTests: XCTestCase {
             connectionType: "Cellular",
             wifiSSID: nil,
             wifiRSSI: nil,
-            interfaceName: "pdp_ip0"
+            interfaceName: "pdp_ip0",
+            locationSource: "CoreLocation"
         )
 
         db.insert(original)
@@ -120,6 +123,32 @@ final class QualityDatabaseTests: XCTestCase {
         XCTAssertNil(retrieved.wifiSSID)
         XCTAssertNil(retrieved.wifiRSSI)
         XCTAssertEqual(retrieved.interfaceName, original.interfaceName)
+        XCTAssertEqual(retrieved.locationSource, original.locationSource)
+    }
+
+    /// Update method should modify location fields of an existing record
+    func testUpdateLocation() {
+        let db = makeTempDatabase()
+        let record = makeRecord(latitude: 50.0, longitude: 4.0)
+        db.insert(record)
+
+        // Update location via backpropagation
+        db.update(
+            id: record.id,
+            latitude: 51.0,
+            longitude: 5.0,
+            locationAccuracy: 200.0,
+            locationSource: "Interpolated"
+        )
+
+        let retrieved = db.queryAll().first!
+        XCTAssertEqual(retrieved.latitude, 51.0, accuracy: 0.0001)
+        XCTAssertEqual(retrieved.longitude, 5.0, accuracy: 0.0001)
+        XCTAssertEqual(retrieved.locationAccuracy, 200.0, accuracy: 0.1)
+        XCTAssertEqual(retrieved.locationSource, "Interpolated")
+        // Other fields should be unchanged
+        XCTAssertEqual(retrieved.latencyMs, record.latencyMs)
+        XCTAssertEqual(retrieved.quality, record.quality)
     }
 
     /// WiFi SSID and RSSI should be preserved when present
