@@ -69,8 +69,10 @@ echo -e "${YELLOW}Customizing disk image...${NC}"
 
 # Mount the temporary DMG
 MOUNT_DIR=$(hdiutil attach -readwrite -noverify "$DMG_TEMP" | \
-    grep -E '^\S+\s+Apple_HFS' | \
-    sed 's/.*Apple_HFS\s*//')
+    grep -E 'Apple_HFS' | \
+    sed 's/.*Apple_HFS//' | \
+    sed 's/^[[:space:]]*//' | \
+    sed 's/[[:space:]]*$//')
 
 if [ -z "$MOUNT_DIR" ]; then
     echo -e "${RED}Error: Failed to mount DMG${NC}"
