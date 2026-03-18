@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- App identity -->
+    <key>CFBundleName</key>
+    <string>Network Badge</string>
+
+    <key>CFBundleDisplayName</key>
+    <string>Network Badge</string>
+
+    <key>CFBundleIdentifier</key>
+    <string>com.networkbadge.app</string>
+
+    <key>CFBundleVersion</key>
+    <string>1</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+
+    <key>CFBundleExecutable</key>
+    <string>NetworkBadge</string>
+
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <!--
+      LSUIElement = true makes this a "background" app:
+      - It shows in the menu bar (top-right)
+      - It does NOT show in the Dock
+      - It does NOT appear in the Cmd+Tab app switcher
+      This is the standard pattern for menu bar utilities.
+    -->
+    <key>LSUIElement</key>
+    <true/>
+
+    <!-- App icon (without .icns extension) -->
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+
+    <!-- Minimum macOS version -->
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+</dict>
+</plist>
