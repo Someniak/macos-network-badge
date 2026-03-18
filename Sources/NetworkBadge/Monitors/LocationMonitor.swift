@@ -33,6 +33,7 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     @Published var isTrackingEnabled: Bool = false {
         didSet {
             UserDefaults.standard.set(isTrackingEnabled, forKey: "gpsTrackingEnabled")
+            guard !isInitializing else { return }
             if isTrackingEnabled {
                 locationManager.requestWhenInUseAuthorization()
                 updateAuthorizationStatus()
@@ -100,6 +101,12 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     private var stationaryTimer: Timer?
     private var currentStationaryInterval: TimeInterval = 10
 
+    /// Maximum stationary poll interval (5 minutes) to prevent unbounded growth
+    private let maxStationaryInterval: TimeInterval = 300
+
+    /// Guards against didSet side-effects during init
+    private var isInitializing = true
+
     // MARK: - Initialization
 
     init(database: QualityDatabase) {
@@ -108,6 +115,8 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
         super.init()
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        // Load persisted value. didSet is safe here because isInitializing
+        // prevents it from starting location services before start() is called.
         if UserDefaults.standard.object(forKey: "gpsTrackingEnabled") != nil {
             isTrackingEnabled = UserDefaults.standard.bool(forKey: "gpsTrackingEnabled")
         }
@@ -118,6 +127,7 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
         let savedMultiplier = UserDefaults.standard.double(forKey: "gpsStationaryMultiplier")
         if savedMultiplier > 0 { stationaryMultiplier = savedMultiplier }
         locationManager.distanceFilter = minimumDistance
+        isInitializing = false
     }
 
     // MARK: - Start / Stop
@@ -142,6 +152,8 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
         intelligence.flushOnStop()
         intelligence.resetKalman()
         currentLocation = nil
+        latitude = nil
+        longitude = nil
         isTracking = false
     }
 
@@ -152,7 +164,7 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let location = locations.last else { return }
+        guard isTracking, let location = locations.last else { return }
 
         // Update published coordinates
         DispatchQueue.main.async { [weak self] in
@@ -380,7 +392,10 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
             bufferLatencyOnlyRecord()
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                self.currentStationaryInterval *= self.stationaryMultiplier
+                self.currentStationaryInterval = min(
+                    self.currentStationaryInterval * self.stationaryMultiplier,
+                    self.maxStationaryInterval
+                )
                 self.scheduleStationaryPoll()
             }
             return
@@ -410,7 +425,10 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.sessionRecordCount += 1
-            self.currentStationaryInterval *= self.stationaryMultiplier
+            self.currentStationaryInterval = min(
+                self.currentStationaryInterval * self.stationaryMultiplier,
+                self.maxStationaryInterval
+            )
             self.scheduleStationaryPoll()
         }
     }
