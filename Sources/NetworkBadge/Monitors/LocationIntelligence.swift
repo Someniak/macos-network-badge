@@ -246,7 +246,7 @@ final class LocationIntelligence: ObservableObject {
             return
         }
 
-        let endTime = Date()
+        let endTime = newLocation.timestamp
         let totalDuration = endTime.timeIntervalSince(anchorTime)
 
         guard totalDuration > 0, totalDuration <= maxInterpolationGap else {

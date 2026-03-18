@@ -36,7 +36,7 @@ struct QualityTrailBuilder {
     static func buildTrail(from records: [QualityRecord]) -> [TrailSegment] {
         // Filter out records with no location, then sort by time
         let located = records
-            .filter { $0.latitude != 0 || $0.longitude != 0 }
+            .filter { $0.latitude != 0 && $0.longitude != 0 }
             .sorted { $0.timestamp < $1.timestamp }
 
         guard located.count >= 2 else { return [] }
