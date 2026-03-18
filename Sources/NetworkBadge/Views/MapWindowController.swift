@@ -38,6 +38,9 @@ final class MapWindowController: ObservableObject {
     /// The actual NSWindow instance (created lazily)
     private var window: NSWindow?
 
+    /// Observer token for the window close notification
+    private var closeObserver: Any?
+
     // MARK: - Initialization
 
     /// Creates a new map window controller.
@@ -50,6 +53,12 @@ final class MapWindowController: ObservableObject {
         self.database = database
         self.tileCache = tileCache
         self.locationMonitor = locationMonitor
+    }
+
+    deinit {
+        if let observer = closeObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     // MARK: - Window Management
@@ -91,7 +100,7 @@ final class MapWindowController: ObservableObject {
         newWindow.center()
 
         // Set up close notification so we track visibility
-        NotificationCenter.default.addObserver(
+        closeObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
             object: newWindow,
             queue: .main

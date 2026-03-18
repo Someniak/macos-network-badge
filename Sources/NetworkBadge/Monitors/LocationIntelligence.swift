@@ -59,7 +59,13 @@ final class LocationIntelligence: ObservableObject {
     @Published private(set) var currentBearing: Double = 0
 
     /// Current estimated speed in m/s, computed from recent location buffer.
+    /// Thread-safe — acquires the internal queue.
     var estimatedSpeed: Double {
+        queue.sync { _estimatedSpeed }
+    }
+
+    /// Non-locking speed calculation for use inside `queue.sync` blocks.
+    private var _estimatedSpeed: Double {
         guard recentLocations.count >= 2,
               let first = recentLocations.first,
               let last = recentLocations.last else { return 0 }
@@ -72,14 +78,19 @@ final class LocationIntelligence: ObservableObject {
 
     private let database: QualityDatabase
 
-    // MARK: - Kalman Filter State
+    /// Serial queue protecting all mutable state below. LocationIntelligence
+    /// is called from CLLocationManager's delegate thread, the main thread
+    /// (stationary poll), and Swift concurrency (IP geolocation).
+    private let queue = DispatchQueue(label: "LocationIntelligence")
+
+    // MARK: - Kalman Filter State (access on `queue` only)
 
     private var kalmanLat: Double = 0
     private var kalmanLon: Double = 0
     private var kalmanVariance: Double = 1e6  // high initial uncertainty
     private var kalmanInitialized = false
 
-    // MARK: - Backpropagation State
+    // MARK: - Backpropagation State (access on `queue` only)
 
     /// Last known good location (anchor for interpolation)
     private(set) var lastKnownLocation: CLLocation?
@@ -88,11 +99,11 @@ final class LocationIntelligence: ObservableObject {
     /// Records waiting for a GPS fix to determine their position
     private var pendingRecords: [QualityRecord] = []
 
-    // MARK: - IP Geolocation State
+    // MARK: - IP Geolocation State (access on `queue` only)
 
     private var lastIPLookupTime: Date?
 
-    // MARK: - Speed/Bearing Buffer
+    // MARK: - Speed/Bearing Buffer (access on `queue` only)
 
     /// Rolling buffer of recent locations for speed estimation
     private var recentLocations: [(location: CLLocation, time: Date)] = []
@@ -128,40 +139,44 @@ final class LocationIntelligence: ObservableObject {
     /// Smooth a raw GPS reading using a simple 1D Kalman filter.
     /// Reduces noise from Wi-Fi positioning so the map trail doesn't zigzag.
     func kalmanSmooth(_ location: CLLocation) -> CLLocation {
-        let accuracy = max(location.horizontalAccuracy, 1.0)
-        let measurementVariance = accuracy * accuracy
+        queue.sync {
+            let accuracy = max(location.horizontalAccuracy, 1.0)
+            let measurementVariance = accuracy * accuracy
 
-        if !kalmanInitialized {
-            kalmanLat = location.coordinate.latitude
-            kalmanLon = location.coordinate.longitude
-            kalmanVariance = measurementVariance
-            kalmanInitialized = true
-            return location
+            if !kalmanInitialized {
+                kalmanLat = location.coordinate.latitude
+                kalmanLon = location.coordinate.longitude
+                kalmanVariance = measurementVariance
+                kalmanInitialized = true
+                return location
+            }
+
+            // Predict step: increase uncertainty based on movement
+            let processNoise = max(_estimatedSpeed * 0.1, 0.0001)
+            kalmanVariance += processNoise
+
+            // Update step: blend prediction with measurement
+            let kalmanGain = kalmanVariance / (kalmanVariance + measurementVariance)
+            kalmanLat += kalmanGain * (location.coordinate.latitude - kalmanLat)
+            kalmanLon += kalmanGain * (location.coordinate.longitude - kalmanLon)
+            kalmanVariance *= (1.0 - kalmanGain)
+
+            return CLLocation(
+                coordinate: CLLocationCoordinate2D(latitude: kalmanLat, longitude: kalmanLon),
+                altitude: location.altitude,
+                horizontalAccuracy: sqrt(kalmanVariance),
+                verticalAccuracy: location.verticalAccuracy,
+                timestamp: location.timestamp
+            )
         }
-
-        // Predict step: increase uncertainty based on movement
-        let processNoise = max(estimatedSpeed * 0.1, 0.0001)
-        kalmanVariance += processNoise
-
-        // Update step: blend prediction with measurement
-        let kalmanGain = kalmanVariance / (kalmanVariance + measurementVariance)
-        kalmanLat += kalmanGain * (location.coordinate.latitude - kalmanLat)
-        kalmanLon += kalmanGain * (location.coordinate.longitude - kalmanLon)
-        kalmanVariance *= (1.0 - kalmanGain)
-
-        return CLLocation(
-            coordinate: CLLocationCoordinate2D(latitude: kalmanLat, longitude: kalmanLon),
-            altitude: location.altitude,
-            horizontalAccuracy: sqrt(kalmanVariance),
-            verticalAccuracy: location.verticalAccuracy,
-            timestamp: location.timestamp
-        )
     }
 
     /// Reset the Kalman filter (e.g. when tracking restarts).
     func resetKalman() {
-        kalmanInitialized = false
-        kalmanVariance = 1e6
+        queue.sync {
+            kalmanInitialized = false
+            kalmanVariance = 1e6
+        }
     }
 
     // MARK: - Accuracy Classification
@@ -180,26 +195,29 @@ final class LocationIntelligence: ObservableObject {
     /// Check if a location is physically possible given the time since last known position.
     /// Returns nil if the point is an outlier (teleportation).
     func validateLocation(_ location: CLLocation) -> CLLocation? {
-        guard let last = lastKnownLocation, let lastTime = lastKnownTime else {
-            return location  // First location — accept
+        queue.sync {
+            guard let last = lastKnownLocation, let lastTime = lastKnownTime else {
+                return location  // First location — accept
+            }
+
+            let elapsed = location.timestamp.timeIntervalSince(lastTime)
+            guard elapsed > 0 else { return location }
+
+            let distance = location.distance(from: last)
+            let speed = distance / elapsed
+
+            if speed > maxReasonableSpeed {
+                return nil  // Physically impossible — reject
+            }
+            return location
         }
-
-        let elapsed = location.timestamp.timeIntervalSince(lastTime)
-        guard elapsed > 0 else { return location }
-
-        let distance = location.distance(from: last)
-        let speed = distance / elapsed
-
-        if speed > maxReasonableSpeed {
-            return nil  // Physically impossible — reject
-        }
-        return location
     }
 
     // MARK: - Bearing
 
     /// Update the current bearing based on movement between two locations.
-    func updateBearing(from oldLocation: CLLocation, to newLocation: CLLocation) {
+    /// Must be called on `queue`.
+    private func _updateBearing(from oldLocation: CLLocation, to newLocation: CLLocation) {
         let lat1 = oldLocation.coordinate.latitude * .pi / 180
         let lat2 = newLocation.coordinate.latitude * .pi / 180
         let dLon = (newLocation.coordinate.longitude - oldLocation.coordinate.longitude) * .pi / 180
@@ -208,7 +226,13 @@ final class LocationIntelligence: ObservableObject {
         let x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
         var bearing = atan2(y, x) * 180 / .pi
         if bearing < 0 { bearing += 360 }
-        currentBearing = bearing
+        DispatchQueue.main.async { [weak self] in
+            self?.currentBearing = bearing
+        }
+    }
+
+    func updateBearing(from oldLocation: CLLocation, to newLocation: CLLocation) {
+        queue.sync { _updateBearing(from: oldLocation, to: newLocation) }
     }
 
     // MARK: - Anchor Management
@@ -216,74 +240,81 @@ final class LocationIntelligence: ObservableObject {
     /// Record a validated location as the latest anchor point.
     /// Updates speed buffer and bearing.
     func recordAnchor(_ location: CLLocation) {
-        if let prev = lastKnownLocation {
-            updateBearing(from: prev, to: location)
+        queue.sync {
+            if let prev = lastKnownLocation {
+                _updateBearing(from: prev, to: location)
+            }
+            let time = location.timestamp
+            recentLocations.append((location: location, time: time))
+            if recentLocations.count > 10 { recentLocations.removeFirst() }
+            lastKnownLocation = location
+            lastKnownTime = time
         }
-        let time = location.timestamp
-        recentLocations.append((location: location, time: time))
-        if recentLocations.count > 10 { recentLocations.removeFirst() }
-        lastKnownLocation = location
-        lastKnownTime = time
     }
 
     // MARK: - Backpropagation
 
     /// Buffer a record that has no GPS fix, for later interpolation.
     func bufferRecord(_ record: QualityRecord) {
-        pendingRecords.append(record)
-        if pendingRecords.count > 50 { pendingRecords.removeFirst() }
+        queue.sync {
+            pendingRecords.append(record)
+            if pendingRecords.count > 50 { pendingRecords.removeFirst() }
+        }
     }
 
     /// When a new valid GPS fix arrives, interpolate positions for all buffered records.
     /// Uses linear interpolation between the last anchor and the new location,
     /// proportional to each record's timestamp.
     func backpropagate(newLocation: CLLocation) {
-        guard !pendingRecords.isEmpty else { return }
+        queue.sync {
+            guard !pendingRecords.isEmpty else { return }
 
-        guard let anchorLocation = lastKnownLocation, let anchorTime = lastKnownTime else {
-            // No start anchor — assign all pending to the new location
-            flushPendingAt(location: newLocation)
-            return
-        }
+            guard let anchorLocation = lastKnownLocation, let anchorTime = lastKnownTime else {
+                // No start anchor — assign all pending to the new location
+                _flushPendingAt(location: newLocation)
+                return
+            }
 
-        let endTime = newLocation.timestamp
-        let totalDuration = endTime.timeIntervalSince(anchorTime)
+            let endTime = newLocation.timestamp
+            let totalDuration = endTime.timeIntervalSince(anchorTime)
 
-        guard totalDuration > 0, totalDuration <= maxInterpolationGap else {
-            // Gap too large — discard pending (unreliable interpolation)
+            guard totalDuration > 0, totalDuration <= maxInterpolationGap else {
+                // Gap too large — discard pending (unreliable interpolation)
+                pendingRecords.removeAll()
+                return
+            }
+
+            let totalDistance = newLocation.distance(from: anchorLocation)
+
+            for record in pendingRecords {
+                let t = max(0, min(1, record.timestamp.timeIntervalSince(anchorTime) / totalDuration))
+
+                let lat = anchorLocation.coordinate.latitude +
+                    t * (newLocation.coordinate.latitude - anchorLocation.coordinate.latitude)
+                let lon = anchorLocation.coordinate.longitude +
+                    t * (newLocation.coordinate.longitude - anchorLocation.coordinate.longitude)
+
+                let estimatedAccuracy = max(
+                    anchorLocation.horizontalAccuracy,
+                    newLocation.horizontalAccuracy,
+                    totalDistance * 0.1
+                )
+
+                database.update(
+                    id: record.id,
+                    latitude: lat,
+                    longitude: lon,
+                    locationAccuracy: estimatedAccuracy,
+                    locationSource: LocationSource.interpolated.rawValue
+                )
+            }
             pendingRecords.removeAll()
-            return
         }
-
-        let totalDistance = newLocation.distance(from: anchorLocation)
-
-        for record in pendingRecords {
-            let t = max(0, min(1, record.timestamp.timeIntervalSince(anchorTime) / totalDuration))
-
-            let lat = anchorLocation.coordinate.latitude +
-                t * (newLocation.coordinate.latitude - anchorLocation.coordinate.latitude)
-            let lon = anchorLocation.coordinate.longitude +
-                t * (newLocation.coordinate.longitude - anchorLocation.coordinate.longitude)
-
-            let estimatedAccuracy = max(
-                anchorLocation.horizontalAccuracy,
-                newLocation.horizontalAccuracy,
-                totalDistance * 0.1
-            )
-
-            database.update(
-                id: record.id,
-                latitude: lat,
-                longitude: lon,
-                locationAccuracy: estimatedAccuracy,
-                locationSource: LocationSource.interpolated.rawValue
-            )
-        }
-        pendingRecords.removeAll()
     }
 
     /// Flush pending records by assigning them all to a single location.
-    private func flushPendingAt(location: CLLocation) {
+    /// Must be called on `queue`.
+    private func _flushPendingAt(location: CLLocation) {
         for record in pendingRecords {
             database.update(
                 id: record.id,
@@ -298,11 +329,11 @@ final class LocationIntelligence: ObservableObject {
 
     /// Discard all pending records (called when tracking stops).
     func flushOnStop() {
-        pendingRecords.removeAll()
+        queue.sync { pendingRecords.removeAll() }
     }
 
     /// Number of records currently awaiting backpropagation.
-    var pendingCount: Int { pendingRecords.count }
+    var pendingCount: Int { queue.sync { pendingRecords.count } }
 
     // MARK: - Road/Rail Snapping
 
@@ -333,18 +364,21 @@ final class LocationIntelligence: ObservableObject {
     /// Query an IP geolocation API for approximate city-level coordinates.
     /// Rate-limited to 1 request per 60 seconds.
     func fetchIPGeolocation() async -> (latitude: Double, longitude: Double)? {
-        if let last = lastIPLookupTime, Date().timeIntervalSince(last) < 60 {
-            return nil  // Rate limited
+        let shouldFetch: Bool = queue.sync {
+            if let last = lastIPLookupTime, Date().timeIntervalSince(last) < 60 {
+                return false  // Rate limited
+            }
+            return true
         }
+        guard shouldFetch else { return nil }
 
-        guard let url = URL(string: "http://ip-api.com/json/?fields=lat,lon,status") else { return nil }
+        guard let url = URL(string: "https://ipapi.co/json/") else { return nil }
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  json["status"] as? String == "success",
-                  let lat = json["lat"] as? Double,
-                  let lon = json["lon"] as? Double else { return nil }
-            lastIPLookupTime = Date()
+                  let lat = json["latitude"] as? Double,
+                  let lon = json["longitude"] as? Double else { return nil }
+            queue.sync { lastIPLookupTime = Date() }
             return (lat, lon)
         } catch {
             return nil

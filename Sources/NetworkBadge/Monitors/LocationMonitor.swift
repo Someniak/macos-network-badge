@@ -164,19 +164,17 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard isTracking, let location = locations.last else { return }
+        guard let location = locations.last else { return }
 
-        // Update published coordinates
+        // Dispatch all state mutations to the main thread so they don't
+        // race with performStationaryRecord (which runs on a main-thread timer).
         DispatchQueue.main.async { [weak self] in
-            self?.latitude = location.coordinate.latitude
-            self?.longitude = location.coordinate.longitude
+            guard let self, self.isTracking else { return }
+            self.latitude = location.coordinate.latitude
+            self.longitude = location.coordinate.longitude
+            self.currentLocation = location
+            self.recordIfNeeded(at: location)
         }
-
-        // Store current location for stationary polling
-        currentLocation = location
-
-        // Check if we should record a measurement
-        recordIfNeeded(at: location)
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {

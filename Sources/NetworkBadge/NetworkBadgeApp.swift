@@ -27,10 +27,10 @@ struct NetworkBadgeApp: App {
     @StateObject private var networkMonitor = NetworkMonitor()
 
     /// Measures internet latency every few seconds
-    @StateObject private var latencyMonitor = LatencyMonitor()
+    @StateObject private var latencyMonitor: LatencyMonitor
 
     /// Manages quality-drop notifications
-    @StateObject private var notificationManager = NotificationManager()
+    @StateObject private var notificationManager: NotificationManager
 
     // MARK: - GPS Quality Tracking
 

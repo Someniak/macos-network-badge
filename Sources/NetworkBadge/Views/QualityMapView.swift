@@ -238,33 +238,39 @@ struct QualityMapView: View {
     /// Loads records from the database with current filters applied.
     /// Called on appear and whenever filters change.
     private func loadRecords() {
-        totalRecords = database.recordCount()
+        let db = database
+        let tFilter = timeFilter
+        let qFilter = qualityFilter
 
-        var filtered: [QualityRecord]
+        Task.detached {
+            let count = db.recordCount()
 
-        // Apply time filter
-        if let startDate = timeFilter.startDate {
-            filtered = database.queryTimeRange(from: startDate, to: Date())
-        } else {
-            filtered = database.queryAll()
-        }
+            var filtered: [QualityRecord]
+            if let startDate = tFilter.startDate {
+                filtered = db.queryTimeRange(from: startDate, to: Date())
+            } else {
+                filtered = db.queryAll()
+            }
 
-        // Apply quality filter
-        if qualityFilter != .all {
-            filtered = filtered.filter { record in
-                qualityFilter.matches(quality: record.quality)
+            if qFilter != .all {
+                filtered = filtered.filter { record in
+                    qFilter.matches(quality: record.quality)
+                }
+            }
+
+            let builtSegments = QualityTrailBuilder.buildTrail(from: filtered)
+            let visibleRecords = filtered.filter { record in
+                record.locationSourceLevel != .none &&
+                (record.latitude != 0 && record.longitude != 0)
+            }
+
+            await MainActor.run {
+                totalRecords = count
+                segments = builtSegments
+                records = visibleRecords
+                updateRegionIfNeeded()
             }
         }
-
-        // Build trail segments from all filtered records (including interpolated)
-        segments = QualityTrailBuilder.buildTrail(from: filtered)
-
-        // Filter out records with no location for the annotation layer
-        records = filtered.filter { record in
-            record.locationSourceLevel != .none &&
-            (record.latitude != 0 && record.longitude != 0)
-        }
-        updateRegionIfNeeded()
     }
 
     /// Centers the map on the user's current GPS location
@@ -295,10 +301,13 @@ struct QualityMapView: View {
         let lats = records.map { $0.latitude }
         let lons = records.map { $0.longitude }
 
-        let centerLat = (lats.min()! + lats.max()!) / 2
-        let centerLon = (lons.min()! + lons.max()!) / 2
-        let spanLat = max((lats.max()! - lats.min()!) * 1.3, 0.01)
-        let spanLon = max((lons.max()! - lons.min()!) * 1.3, 0.01)
+        guard let minLat = lats.min(), let maxLat = lats.max(),
+              let minLon = lons.min(), let maxLon = lons.max() else { return }
+
+        let centerLat = (minLat + maxLat) / 2
+        let centerLon = (minLon + maxLon) / 2
+        let spanLat = max((maxLat - minLat) * 1.3, 0.01)
+        let spanLon = max((maxLon - minLon) * 1.3, 0.01)
 
         region = MKCoordinateRegion(
             center: CLLocationCoordinate2D(latitude: centerLat, longitude: centerLon),

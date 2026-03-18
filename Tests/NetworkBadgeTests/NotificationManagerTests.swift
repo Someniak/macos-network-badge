@@ -89,30 +89,4 @@ final class NotificationManagerTests: XCTestCase {
         XCTAssertNil(manager.lastNotificationDate)
     }
 
-    // MARK: - Latency Monitor Previous Quality Tests
-
-    /// LatencyMonitor should track previousQuality on sample recording
-    func testLatencyMonitorTracksPreviousQuality() {
-        let monitor = LatencyMonitor()
-
-        // Record an excellent sample
-        let sample1 = LatencySample(
-            timestamp: Date(),
-            latencyMs: 20,
-            wasSuccessful: true
-        )
-        monitor.recordSample(sample1)
-        XCTAssertEqual(monitor.quality, .excellent)
-        XCTAssertEqual(monitor.previousQuality, .unknown) // was unknown before
-
-        // Record a poor sample
-        let sample2 = LatencySample(
-            timestamp: Date(),
-            latencyMs: 200,
-            wasSuccessful: true
-        )
-        monitor.recordSample(sample2)
-        XCTAssertEqual(monitor.quality, .poor)
-        XCTAssertEqual(monitor.previousQuality, .excellent) // was excellent before
-    }
 }

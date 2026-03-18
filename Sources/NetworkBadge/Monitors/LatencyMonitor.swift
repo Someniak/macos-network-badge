@@ -37,10 +37,6 @@ final class LatencyMonitor: ObservableObject {
     /// Human-friendly quality rating based on current latency
     @Published var quality: LatencyQuality = .unknown
 
-    /// The quality level before the most recent change
-    /// (used by NotificationManager to detect degradation)
-    @Published var previousQuality: LatencyQuality = .unknown
-
     /// History of recent measurements (newest first, max 20)
     @Published var samples: [LatencySample] = []
 
@@ -115,13 +111,8 @@ final class LatencyMonitor: ObservableObject {
         // Do an initial measurement right away
         measureLatency()
 
-        // Then schedule periodic measurements
-        timer = Timer.scheduledTimer(
-            withTimeInterval: measurementInterval,
-            repeats: true
-        ) { [weak self] _ in
-            self?.measureLatency()
-        }
+        // Then schedule periodic measurements on the main run loop
+        scheduleTimer()
     }
 
     /// Stop measuring. Call this when the app quits.
@@ -134,12 +125,16 @@ final class LatencyMonitor: ObservableObject {
     private func restartTimer() {
         guard timer != nil else { return }  // not started yet
         timer?.invalidate()
-        timer = Timer.scheduledTimer(
-            withTimeInterval: measurementInterval,
-            repeats: true
-        ) { [weak self] _ in
+        scheduleTimer()
+    }
+
+    /// Creates and schedules a repeating timer on the main run loop.
+    private func scheduleTimer() {
+        let t = Timer(timeInterval: measurementInterval, repeats: true) { [weak self] _ in
             self?.measureLatency()
         }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     // MARK: - Measurement
@@ -206,9 +201,6 @@ final class LatencyMonitor: ObservableObject {
         if samples.count > maxSampleCount {
             samples = Array(samples.prefix(maxSampleCount))
         }
-
-        // Save previous quality before updating (for change detection)
-        previousQuality = quality
 
         // Update current latency
         if sample.wasSuccessful {
