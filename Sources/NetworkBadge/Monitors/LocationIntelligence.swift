@@ -219,10 +219,11 @@ final class LocationIntelligence: ObservableObject {
         if let prev = lastKnownLocation {
             updateBearing(from: prev, to: location)
         }
-        recentLocations.append((location: location, time: Date()))
+        let time = location.timestamp
+        recentLocations.append((location: location, time: time))
         if recentLocations.count > 10 { recentLocations.removeFirst() }
         lastKnownLocation = location
-        lastKnownTime = Date()
+        lastKnownTime = time
     }
 
     // MARK: - Backpropagation

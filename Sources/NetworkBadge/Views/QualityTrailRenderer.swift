@@ -34,17 +34,17 @@ struct QualityTrailBuilder {
 
     /// Convert sorted records into colored polyline segments.
     static func buildTrail(from records: [QualityRecord]) -> [TrailSegment] {
-        guard records.count >= 2 else { return [] }
-        let sorted = records.sorted { $0.timestamp < $1.timestamp }
+        // Filter out records with no location, then sort by time
+        let located = records
+            .filter { $0.latitude != 0 || $0.longitude != 0 }
+            .sorted { $0.timestamp < $1.timestamp }
+
+        guard located.count >= 2 else { return [] }
 
         var segments: [TrailSegment] = []
-        for i in 0..<(sorted.count - 1) {
-            let current = sorted[i]
-            let next = sorted[i + 1]
-
-            // Skip points with no location
-            guard current.latitude != 0 || current.longitude != 0,
-                  next.latitude != 0 || next.longitude != 0 else { continue }
+        for i in 0..<(located.count - 1) {
+            let current = located[i]
+            let next = located[i + 1]
 
             // Skip large time gaps (different trips)
             let gap = next.timestamp.timeIntervalSince(current.timestamp)

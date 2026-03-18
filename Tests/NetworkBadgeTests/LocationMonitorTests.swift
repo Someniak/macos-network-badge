@@ -14,6 +14,8 @@ final class LocationMonitorTests: XCTestCase {
     // MARK: - Helpers
 
     private func makeMonitor() -> LocationMonitor {
+        // Reset persisted tracking state to avoid test pollution
+        UserDefaults.standard.removeObject(forKey: "gpsTrackingEnabled")
         let path = NSTemporaryDirectory() + "loc_test_\(UUID().uuidString).db"
         return LocationMonitor(database: QualityDatabase(path: path))
     }
