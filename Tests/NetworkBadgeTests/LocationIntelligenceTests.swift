@@ -13,6 +13,12 @@ final class LocationIntelligenceTests: XCTestCase {
 
     // MARK: - Helpers
 
+    private func waitForMainQueue(timeout: TimeInterval = 1.0) {
+        let exp = expectation(description: "main queue flush")
+        DispatchQueue.main.async { exp.fulfill() }
+        wait(for: [exp], timeout: timeout)
+    }
+
     private func makeIntelligence() -> (LocationIntelligence, QualityDatabase) {
         let path = NSTemporaryDirectory() + "li_test_\(UUID().uuidString).db"
         let db = QualityDatabase(path: path)
@@ -272,6 +278,7 @@ final class LocationIntelligenceTests: XCTestCase {
         let east = makeLocation(latitude: 50.0, longitude: 5.0)
 
         intelligence.updateBearing(from: start, to: east)
+        waitForMainQueue()
 
         XCTAssertGreaterThan(intelligence.currentBearing, 80)
         XCTAssertLessThan(intelligence.currentBearing, 100)
@@ -285,6 +292,7 @@ final class LocationIntelligenceTests: XCTestCase {
         let north = makeLocation(latitude: 51.0, longitude: 4.0)
 
         intelligence.updateBearing(from: start, to: north)
+        waitForMainQueue()
 
         XCTAssertLessThan(intelligence.currentBearing, 10)
     }
