@@ -8,6 +8,7 @@
 //   - Current latency (big and prominent)
 //   - Average latency and quality indicator
 //   - Sparkline chart of recent measurements
+//   - GPS tracking status and "Show Map" button
 //   - Settings (Launch at Login, Alert on Poor Connection)
 //   - Quit button
 // ---------------------------------------------------------
@@ -27,6 +28,12 @@ struct MenuBarView: View {
     /// The notification manager — controls quality drop alerts
     @ObservedObject var notificationManager: NotificationManager
 
+    /// The location monitor — tracks GPS for quality mapping
+    @ObservedObject var locationMonitor: LocationMonitor
+
+    /// Controls the separate map window
+    @ObservedObject var mapWindowController: MapWindowController
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
 
@@ -40,6 +47,11 @@ struct MenuBarView: View {
 
             SparklineView(samples: latencyMonitor.samples)
                 .frame(height: 60)
+
+            Divider()
+
+            // ── Quality Map ─────────────────────────────
+            mapSection
 
             Divider()
 
@@ -117,6 +129,56 @@ struct MenuBarView: View {
                     .font(.subheadline.monospacedDigit())
                     .foregroundColor(.secondary)
             }
+        }
+    }
+
+    // MARK: - Quality Map
+
+    /// Shows GPS tracking status and a button to open the map window.
+    /// The map shows all recorded network quality measurements as
+    /// colored dots overlaid on a real map.
+    private var mapSection: some View {
+        HStack(spacing: 8) {
+            // GPS status indicator
+            if locationMonitor.isTracking {
+                Image(systemName: "location.fill")
+                    .font(.caption)
+                    .foregroundColor(.green)
+                Text("Tracking")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                if locationMonitor.sessionRecordCount > 0 {
+                    Text("(\(locationMonitor.sessionRecordCount) pts)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            } else if !locationMonitor.isAuthorized {
+                Image(systemName: "location.slash")
+                    .font(.caption)
+                    .foregroundColor(.orange)
+                Text("Location off")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                Image(systemName: "location")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Text("Waiting for GPS")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            // Open map window button
+            Button(action: {
+                mapWindowController.showWindow()
+            }) {
+                Label("Show Map", systemImage: "map")
+                    .font(.caption)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
     }
 

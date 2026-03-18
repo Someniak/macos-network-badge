@@ -42,5 +42,16 @@
     <!-- Minimum macOS version -->
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
+
+    <!--
+      Location permission descriptions — required by CoreLocation.
+      macOS shows these strings when asking the user for permission.
+      We only need "when in use" (not "always") for quality tracking.
+    -->
+    <key>NSLocationUsageDescription</key>
+    <string>Network Badge uses your location to map network quality measurements so you can see where your connection was good or bad.</string>
+
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Network Badge uses your location to map network quality measurements so you can see where your connection was good or bad.</string>
 </dict>
 </plist>
