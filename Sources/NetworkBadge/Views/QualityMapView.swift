@@ -31,12 +31,15 @@ struct QualityMapView: View {
     /// The tile cache for offline map support
     let tileCache: TileCache
 
-    /// Current user location (from LocationMonitor)
-    let currentLatitude: Double?
-    let currentLongitude: Double?
+    /// Location monitor for live position updates
+    @ObservedObject var locationMonitor: LocationMonitor
 
-    /// Current bearing in degrees (from LocationIntelligence)
-    let currentBearing: Double
+    /// Current user location (from LocationMonitor, live-updating)
+    private var currentLatitude: Double? { locationMonitor.latitude }
+    private var currentLongitude: Double? { locationMonitor.longitude }
+
+    /// Current bearing in degrees (from LocationIntelligence, live-updating)
+    private var currentBearing: Double { locationMonitor.intelligence.currentBearing }
 
     /// Records to display on the map
     @State private var records: [QualityRecord] = []

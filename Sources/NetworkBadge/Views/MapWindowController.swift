@@ -65,12 +65,11 @@ final class MapWindowController: ObservableObject {
         }
 
         // Create the SwiftUI map view
+        guard let monitor = locationMonitor else { return }
         let mapView = QualityMapView(
             database: database,
             tileCache: tileCache,
-            currentLatitude: locationMonitor?.latitude,
-            currentLongitude: locationMonitor?.longitude,
-            currentBearing: locationMonitor?.intelligence.currentBearing ?? 0
+            locationMonitor: monitor
         )
 
         // Wrap in an NSHostingController for AppKit integration
