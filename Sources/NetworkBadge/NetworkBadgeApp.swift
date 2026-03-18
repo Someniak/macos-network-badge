@@ -47,6 +47,9 @@ struct NetworkBadgeApp: App {
     /// Controls the separate map window
     @StateObject private var mapWindowController: MapWindowController
 
+    /// Controls the settings window
+    @StateObject private var settingsWindowController: SettingsWindowController
+
     // MARK: - Initialization
 
     /// Sets up the database, tile cache, location monitor, and map window.
@@ -56,17 +59,27 @@ struct NetworkBadgeApp: App {
         let db = QualityDatabase()
         let cache = TileCache()
         let locMonitor = LocationMonitor(database: db)
+        let notifManager = NotificationManager()
         let mapController = MapWindowController(
             database: db,
             tileCache: cache,
             locationMonitor: locMonitor
         )
+        let latMonitor = LatencyMonitor()
+        let settingsController = SettingsWindowController(
+            notificationManager: notifManager,
+            locationMonitor: locMonitor,
+            latencyMonitor: latMonitor
+        )
 
         // Use the shared instances
         self.qualityDatabase = db
         self.tileCache = cache
+        _latencyMonitor = StateObject(wrappedValue: latMonitor)
+        _notificationManager = StateObject(wrappedValue: notifManager)
         _locationMonitor = StateObject(wrappedValue: locMonitor)
         _mapWindowController = StateObject(wrappedValue: mapController)
+        _settingsWindowController = StateObject(wrappedValue: settingsController)
     }
 
     // MARK: - App Body
@@ -85,7 +98,8 @@ struct NetworkBadgeApp: App {
                 latencyMonitor: latencyMonitor,
                 notificationManager: notificationManager,
                 locationMonitor: locationMonitor,
-                mapWindowController: mapWindowController
+                mapWindowController: mapWindowController,
+                settingsWindowController: settingsWindowController
             )
         } label: {
             // ── Menu Bar Label ──────────────────────────

@@ -29,6 +29,21 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     /// Current longitude (nil if no location yet)
     @Published var longitude: Double?
 
+    /// Whether the user has enabled GPS tracking (persisted; defaults to false)
+    @Published var isTrackingEnabled: Bool = false {
+        didSet {
+            UserDefaults.standard.set(isTrackingEnabled, forKey: "gpsTrackingEnabled")
+            if isTrackingEnabled {
+                locationManager.requestWhenInUseAuthorization()
+                updateAuthorizationStatus()
+            } else {
+                locationManager.stopUpdatingLocation()
+                cancelStationaryTimer()
+                isTracking = false
+            }
+        }
+    }
+
     /// Whether location services are available and authorized
     @Published var isAuthorized: Bool = false
 
@@ -52,16 +67,35 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     private let locationManager = CLLocationManager()
 
     /// Minimum distance in meters before recording a new measurement
-    private let minimumDistance: CLLocationDistance = 50.0
+    @Published var minimumDistance: CLLocationDistance = 50.0 {
+        didSet {
+            UserDefaults.standard.set(minimumDistance, forKey: "gpsMinimumDistance")
+            locationManager.distanceFilter = minimumDistance
+        }
+    }
 
     /// Last location where we recorded a measurement
     private var lastRecordedLocation: CLLocation?
 
     /// Minimum time between recordings (prevents spam when jittering at one spot)
-    private let minimumInterval: TimeInterval = 10.0
+    @Published var minimumInterval: TimeInterval = 10.0 {
+        didSet {
+            UserDefaults.standard.set(minimumInterval, forKey: "gpsMinimumInterval")
+        }
+    }
 
     /// Timestamp of last recording
     private var lastRecordedTime: Date?
+
+    /// Backoff multiplier applied to the stationary poll interval after each record.
+    /// e.g. 2.0 means: 10s → 20s → 40s → 80s …
+    @Published var stationaryMultiplier: Double = 2.0 {
+        didSet { UserDefaults.standard.set(stationaryMultiplier, forKey: "gpsStationaryMultiplier") }
+    }
+
+    private var currentLocation: CLLocation?
+    private var stationaryTimer: Timer?
+    private var currentStationaryInterval: TimeInterval = 10
 
     // MARK: - Initialization
 
@@ -70,6 +104,15 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
         super.init()
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        if UserDefaults.standard.object(forKey: "gpsTrackingEnabled") != nil {
+            isTrackingEnabled = UserDefaults.standard.bool(forKey: "gpsTrackingEnabled")
+        }
+        let savedDistance = UserDefaults.standard.double(forKey: "gpsMinimumDistance")
+        if savedDistance > 0 { minimumDistance = savedDistance }
+        let savedInterval = UserDefaults.standard.double(forKey: "gpsMinimumInterval")
+        if savedInterval > 0 { minimumInterval = savedInterval }
+        let savedMultiplier = UserDefaults.standard.double(forKey: "gpsStationaryMultiplier")
+        if savedMultiplier > 0 { stationaryMultiplier = savedMultiplier }
         locationManager.distanceFilter = minimumDistance
     }
 
@@ -80,6 +123,8 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
         self.networkMonitor = networkMonitor
         self.latencyMonitor = latencyMonitor
 
+        guard isTrackingEnabled else { return }
+
         // Request authorization (shows system prompt on first launch)
         locationManager.requestWhenInUseAuthorization()
 
@@ -89,6 +134,8 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     /// Stop tracking location.
     func stop() {
         locationManager.stopUpdatingLocation()
+        cancelStationaryTimer()
+        currentLocation = nil
         isTracking = false
     }
 
@@ -107,6 +154,9 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
             self?.longitude = location.coordinate.longitude
         }
 
+        // Store current location for stationary polling
+        currentLocation = location
+
         // Check if we should record a measurement
         recordIfNeeded(at: location)
     }
@@ -122,17 +172,21 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     // MARK: - Private Methods
 
     private func updateAuthorizationStatus() {
-        let status = locationManager.authorizationStatus
+        apply(authorizationStatus: locationManager.authorizationStatus)
+    }
 
+    func apply(authorizationStatus status: CLAuthorizationStatus) {
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
 
             switch status {
-            case .authorizedAlways, .authorized:
+            case .authorizedAlways, .authorized, .authorizedWhenInUse:
                 self.isAuthorized = true
-                if !self.isTracking {
+                if !self.isTracking && self.isTrackingEnabled {
                     self.locationManager.startUpdatingLocation()
                     self.isTracking = true
+                    self.currentStationaryInterval = self.minimumInterval
+                    self.scheduleStationaryPoll()
                 }
             case .notDetermined:
                 self.isAuthorized = false
@@ -201,7 +255,57 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
         lastRecordedTime = Date()
 
         DispatchQueue.main.async { [weak self] in
-            self?.sessionRecordCount += 1
+            guard let self else { return }
+            self.sessionRecordCount += 1
+            self.currentStationaryInterval = self.minimumInterval
+            self.scheduleStationaryPoll()
+        }
+    }
+
+    private func scheduleStationaryPoll() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.stationaryTimer?.invalidate()
+            let t = Timer(timeInterval: self.currentStationaryInterval, repeats: false) {
+                [weak self] _ in self?.performStationaryRecord()
+            }
+            RunLoop.main.add(t, forMode: .common)
+            self.stationaryTimer = t
+        }
+    }
+
+    private func cancelStationaryTimer() {
+        stationaryTimer?.invalidate()
+        stationaryTimer = nil
+    }
+
+    private func performStationaryRecord() {
+        guard isTracking, let location = currentLocation else { return }
+        guard location.horizontalAccuracy >= 0 && location.horizontalAccuracy < 200 else { return }
+        guard let network = networkMonitor, let latency = latencyMonitor else { return }
+        guard latency.samples.count > 0 else { return }
+
+        let latestSample = latency.samples.first
+        let record = QualityRecord.from(
+            latitude: location.coordinate.latitude,
+            longitude: location.coordinate.longitude,
+            locationAccuracy: location.horizontalAccuracy,
+            latencyMs: latestSample?.latencyMs ?? 0,
+            wasSuccessful: latestSample?.wasSuccessful ?? false,
+            connectionType: network.connectionType,
+            wifiSSID: network.wifiSSID,
+            wifiRSSI: network.wifiRSSI,
+            interfaceName: network.interfaceName
+        )
+        database.insert(record)
+        lastRecordedLocation = location
+        lastRecordedTime = Date()
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.sessionRecordCount += 1
+            self.currentStationaryInterval *= self.stationaryMultiplier
+            self.scheduleStationaryPoll()
         }
     }
 }

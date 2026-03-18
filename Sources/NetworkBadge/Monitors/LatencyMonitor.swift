@@ -49,22 +49,26 @@ final class LatencyMonitor: ObservableObject {
 
     // MARK: - Configuration
 
-    /// How often to measure latency (in seconds)
-    let measurementInterval: TimeInterval
+    /// How often to measure latency (in seconds), persisted across launches
+    @Published var measurementInterval: TimeInterval = 3.0 {
+        didSet {
+            UserDefaults.standard.set(measurementInterval, forKey: "pollInterval")
+            restartTimer()
+        }
+    }
+
+    /// The URL we ping to measure latency, persisted across launches
+    @Published var targetURL: URL = URL(string: "http://captive.apple.com/hotspot-detect.html")! {
+        didSet {
+            UserDefaults.standard.set(targetURL.absoluteString, forKey: "pollTarget")
+        }
+    }
 
     /// How long to wait before declaring a timeout (in seconds)
     let timeoutInterval: TimeInterval
 
     /// How many samples to keep in history
     let maxSampleCount: Int
-
-    /// The URL we ping to measure latency.
-    /// Apple's captive portal endpoint is ideal:
-    ///   - Tiny response (just "Success" text)
-    ///   - Works through captive portals
-    ///   - Globally distributed servers
-    ///   - Always available
-    let targetURL: URL
 
     // MARK: - Private Properties
 
@@ -90,14 +94,17 @@ final class LatencyMonitor: ObservableObject {
     ///   - timeout: Seconds before a request is considered timed out (default: 10)
     ///   - maxSamples: How many historical samples to keep (default: 20)
     init(
-        interval: TimeInterval = 3.0,
         timeout: TimeInterval = 10.0,
         maxSamples: Int = 20
     ) {
-        self.measurementInterval = interval
         self.timeoutInterval = timeout
         self.maxSampleCount = maxSamples
-        self.targetURL = URL(string: "http://captive.apple.com/hotspot-detect.html")!
+        let savedInterval = UserDefaults.standard.double(forKey: "pollInterval")
+        if savedInterval > 0 { self.measurementInterval = savedInterval }
+        if let saved = UserDefaults.standard.string(forKey: "pollTarget"),
+           let url = URL(string: saved) {
+            self.targetURL = url
+        }
     }
 
     // MARK: - Start / Stop
@@ -121,6 +128,18 @@ final class LatencyMonitor: ObservableObject {
     func stop() {
         timer?.invalidate()
         timer = nil
+    }
+
+    /// Restarts the periodic timer with the current interval.
+    private func restartTimer() {
+        guard timer != nil else { return }  // not started yet
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(
+            withTimeInterval: measurementInterval,
+            repeats: true
+        ) { [weak self] _ in
+            self?.measureLatency()
+        }
     }
 
     // MARK: - Measurement

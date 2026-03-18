@@ -63,6 +63,7 @@ struct QualityMapView: View {
         VStack(spacing: 0) {
             // ── Map ───────────────────────────────────────
             mapContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             // ── Controls Bar ──────────────────────────────
             controlsBar

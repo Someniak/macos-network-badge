@@ -85,6 +85,7 @@ final class MapWindowController: ObservableObject {
 
         newWindow.title = "Network Quality Map"
         newWindow.contentViewController = hostingController
+        newWindow.setContentSize(NSSize(width: 800, height: 600))
         newWindow.minSize = NSSize(width: 500, height: 400)
         newWindow.isReleasedWhenClosed = false
         newWindow.center()
