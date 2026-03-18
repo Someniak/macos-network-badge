@@ -262,7 +262,7 @@ struct QualityMapView: View {
         // Filter out records with no location for the annotation layer
         records = filtered.filter { record in
             record.locationSourceLevel != .none &&
-            (record.latitude != 0 || record.longitude != 0)
+            (record.latitude != 0 && record.longitude != 0)
         }
         updateRegionIfNeeded()
     }

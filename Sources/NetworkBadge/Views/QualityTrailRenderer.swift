@@ -117,7 +117,7 @@ struct TrailMapView: NSViewRepresentable {
         let visibleRecords = records.filter { record in
             let source = LocationSource(rawValue: record.locationSource) ?? .coreLocation
             return source != .none && source != .interpolated &&
-                   (record.latitude != 0 || record.longitude != 0)
+                   (record.latitude != 0 && record.longitude != 0)
         }
 
         for record in visibleRecords {
