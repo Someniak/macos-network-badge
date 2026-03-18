@@ -21,7 +21,7 @@ import Combine
 /// Usage:
 ///   let manager = NotificationManager()
 ///   manager.requestPermission()
-///   manager.notifyQualityDrop(from: .good, to: .poor, latencyMs: 245)
+///   manager.notifyQualityDrop(to: .poor, latencyMs: 245)
 ///
 final class NotificationManager: ObservableObject {
 
@@ -45,23 +45,20 @@ final class NotificationManager: ObservableObject {
     /// When the last notification was sent
     private(set) var lastNotificationDate: Date? = nil
 
-    /// The notification center we use to deliver notifications
-    private let notificationCenter: UNUserNotificationCenter
+    /// The last observed quality level (used to detect degradation)
+    private var previousQuality: LatencyQuality = .unknown
+
+    /// Returns the notification center only when a bundle identifier is present.
+    /// Without a bundle (e.g. `swift run`) UNUserNotificationCenter crashes.
+    private var notificationCenter: UNUserNotificationCenter? {
+        guard Bundle.main.bundleIdentifier != nil else { return nil }
+        return .current()
+    }
 
     // MARK: - Initialization
 
-    /// Creates a new NotificationManager.
-    ///
-    /// - Parameters:
-    ///   - cooldown: Minimum seconds between notifications (default: 30)
-    ///   - center: The notification center to use (injectable for testing)
-    init(
-        cooldown: TimeInterval = 30.0,
-        center: UNUserNotificationCenter = .current()
-    ) {
+    init(cooldown: TimeInterval = 30.0) {
         self.cooldownInterval = cooldown
-        self.notificationCenter = center
-        // Load persisted preference (defaults to true)
         self.notificationsEnabled = UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? true
     }
 
@@ -71,7 +68,7 @@ final class NotificationManager: ObservableObject {
     /// Call this once at app startup. macOS will show a system dialog
     /// the first time, then remember the user's choice.
     func requestPermission() {
-        notificationCenter.requestAuthorization(options: [.alert, .sound]) { granted, error in
+        notificationCenter?.requestAuthorization(options: [.alert, .sound]) { granted, error in
             if let error = error {
                 print("Notification permission error: \(error)")
             }
@@ -89,14 +86,14 @@ final class NotificationManager: ObservableObject {
     ///   4. At least `cooldownInterval` seconds since last notification
     ///
     /// - Parameters:
-    ///   - oldQuality: The previous quality level
-    ///   - newQuality: The new (worse) quality level
+    ///   - newQuality: The new quality level
     ///   - latencyMs: Current latency for the notification body
     func notifyQualityDrop(
-        from oldQuality: LatencyQuality,
         to newQuality: LatencyQuality,
         latencyMs: Double
     ) {
+        defer { previousQuality = newQuality }
+
         // Check if notifications are enabled
         guard notificationsEnabled else { return }
 
@@ -104,7 +101,7 @@ final class NotificationManager: ObservableObject {
         guard newQuality == .poor || newQuality == .bad else { return }
 
         // Only fire on degradation (new is worse than old)
-        guard isDegradation(from: oldQuality, to: newQuality) else { return }
+        guard isDegradation(from: previousQuality, to: newQuality) else { return }
 
         // Rate limit: don't spam
         if let lastDate = lastNotificationDate {
@@ -152,7 +149,7 @@ final class NotificationManager: ObservableObject {
             trigger: nil  // deliver immediately
         )
 
-        notificationCenter.add(request) { error in
+        notificationCenter?.add(request) { error in
             if let error = error {
                 print("Failed to deliver notification: \(error)")
             }

@@ -28,25 +28,18 @@ struct MenuBarView: View {
     @ObservedObject var notificationManager: NotificationManager
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-
-            // ── Header ──────────────────────────────────
-            headerSection
-
-            Divider()
+        VStack(alignment: .leading, spacing: 10) {
 
             // ── Connection Info ─────────────────────────
             connectionSection
 
             Divider()
 
-            // ── Latency Info ────────────────────────────
+            // ── Latency Info + Sparkline ─────────────────
             latencySection
 
-            Divider()
-
-            // ── Sparkline Chart ─────────────────────────
-            sparklineSection
+            SparklineView(samples: latencyMonitor.samples)
+                .frame(height: 60)
 
             Divider()
 
@@ -58,162 +51,80 @@ struct MenuBarView: View {
             // ── Footer ─────────────────────────────────
             footerSection
         }
-        .padding(16)
+        .padding(14)
         .frame(width: 280)
-    }
-
-    // MARK: - Header
-
-    /// App title at the top of the popover
-    private var headerSection: some View {
-        HStack {
-            Image(systemName: "network")
-                .font(.title2)
-            Text("Network Badge")
-                .font(.headline)
-            Spacer()
-        }
     }
 
     // MARK: - Connection Info
 
-    /// Shows what type of network you're on, SSID, and signal strength
+    /// One-line row: icon + type + SSID + signal quality dot
     private var connectionSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Connection type with icon
-            HStack(spacing: 8) {
-                Image(systemName: networkMonitor.connectionType.symbolName)
-                    .frame(width: 20)
-                Text(networkMonitor.connectionType.rawValue)
-                    .font(.body.bold())
-                Spacer()
-                // Green/red dot for connected/disconnected
-                Circle()
-                    .fill(networkMonitor.isConnected ? Color.green : Color.red)
-                    .frame(width: 8, height: 8)
-            }
-
-            // WiFi network name (only shown when on WiFi)
+        HStack(spacing: 8) {
+            Image(systemName: networkMonitor.connectionType.symbolName)
+                .frame(width: 20)
+            Text(networkMonitor.connectionType.rawValue)
+                .font(.body.bold())
             if let ssid = networkMonitor.wifiSSID {
-                HStack(spacing: 8) {
-                    Image(systemName: "wifi")
-                        .frame(width: 20)
-                        .foregroundColor(.secondary)
-                    Text(ssid)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            // WiFi signal strength (only shown when on WiFi with RSSI data)
-            if let rssi = networkMonitor.wifiRSSI {
-                let signalQuality = WiFiSignalQuality.from(rssi: rssi)
-                HStack(spacing: 8) {
-                    Image(systemName: signalQuality.symbolName)
-                        .frame(width: 20)
-                        .foregroundColor(signalQuality.swiftUIColor)
-                    Text("\(rssi) dBm")
-                        .font(.subheadline)
-                    Spacer()
-                    Text(signalQuality.rawValue)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            // Interface name (e.g. "en0")
-            if !networkMonitor.interfaceName.isEmpty {
-                HStack(spacing: 8) {
-                    Image(systemName: "info.circle")
-                        .frame(width: 20)
-                        .foregroundColor(.secondary)
-                    Text(NetworkInterfaceHelper.displayName(
-                        forInterface: networkMonitor.interfaceName
-                    ))
-                    .font(.caption)
+                Text(ssid)
+                    .font(.subheadline)
                     .foregroundColor(.secondary)
-                }
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
+            Spacer()
+            // Signal quality dot: WiFi uses signal color, otherwise connected/disconnected
+            Circle()
+                .fill(signalDotColor)
+                .frame(width: 8, height: 8)
         }
+    }
+
+    /// Color for the status dot in the connection row
+    private var signalDotColor: Color {
+        if let rssi = networkMonitor.wifiRSSI {
+            return WiFiSignalQuality.from(rssi: rssi).swiftUIColor
+        }
+        return networkMonitor.isConnected ? Color.green : Color.red
     }
 
     // MARK: - Latency Info
 
-    /// Shows the current and average latency with quality indicator
+    /// Single row: big latency + quality badge + avg
     private var latencySection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Current latency — big and prominent
-            HStack {
-                Text("Latency")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                Spacer()
-                if let latency = latencyMonitor.currentLatencyMs {
-                    Text("\(Int(latency)) ms")
-                        .font(.title2.monospacedDigit().bold())
-                        .foregroundColor(latencyMonitor.quality.swiftUIColor)
-                } else {
-                    Text("--")
-                        .font(.title2.bold())
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            // Quality badge
-            HStack {
-                Text("Quality")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                Spacer()
-                Text(latencyMonitor.quality.rawValue)
-                    .font(.subheadline.bold())
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 2)
-                    .background(
-                        latencyMonitor.quality.swiftUIColor.opacity(0.2)
-                    )
-                    .cornerRadius(4)
+        HStack(spacing: 8) {
+            if let latency = latencyMonitor.currentLatencyMs {
+                Text("\(Int(latency)) ms")
+                    .font(.title2.monospacedDigit().bold())
                     .foregroundColor(latencyMonitor.quality.swiftUIColor)
-            }
-
-            // Average latency
-            HStack {
-                Text("Average")
-                    .font(.subheadline)
+            } else {
+                Text("-- ms")
+                    .font(.title2.bold())
                     .foregroundColor(.secondary)
-                Spacer()
-                if let avg = latencyMonitor.averageLatencyMs {
-                    Text("\(Int(avg)) ms")
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundColor(.secondary)
-                } else {
-                    Text("--")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
             }
-        }
-    }
 
-    // MARK: - Sparkline Chart
+            Text(latencyMonitor.quality.rawValue)
+                .font(.caption.bold())
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(latencyMonitor.quality.swiftUIColor.opacity(0.2))
+                .cornerRadius(4)
+                .foregroundColor(latencyMonitor.quality.swiftUIColor)
 
-    /// Shows a mini line chart of recent latency measurements
-    private var sparklineSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("History")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+            Spacer()
 
-            SparklineView(samples: latencyMonitor.samples)
-                .frame(height: 60)
+            if let avg = latencyMonitor.averageLatencyMs {
+                Text("avg \(Int(avg)) ms")
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundColor(.secondary)
+            }
         }
     }
 
     // MARK: - Settings
 
-    /// Launch at Login toggle and notification toggle
+    /// Checkboxes side by side
     private var settingsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        HStack {
             Toggle("Launch at Login", isOn: Binding(
                 get: { SMAppService.mainApp.status == .enabled },
                 set: { newValue in
@@ -231,7 +142,9 @@ struct MenuBarView: View {
             .toggleStyle(.checkbox)
             .font(.subheadline)
 
-            Toggle("Alert on Poor Connection", isOn: $notificationManager.notificationsEnabled)
+            Spacer()
+
+            Toggle("Alerts", isOn: $notificationManager.notificationsEnabled)
                 .toggleStyle(.checkbox)
                 .font(.subheadline)
         }
@@ -246,11 +159,13 @@ struct MenuBarView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
             Spacer()
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
+            Button(action: { NSApplication.shared.terminate(nil) }) {
+                Image(systemName: "power")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)
-            .foregroundColor(.red)
+            .help("Exit Network Badge")
         }
     }
 }

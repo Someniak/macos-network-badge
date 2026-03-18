@@ -87,9 +87,8 @@ struct NetworkBadgeApp: App {
             notificationManager.requestPermission()
         }
         // Watch for quality changes and send notifications on degradation
-        .onChange(of: latencyMonitor.quality) { oldQuality, newQuality in
+        .onChange(of: latencyMonitor.quality) { newQuality in
             notificationManager.notifyQualityDrop(
-                from: oldQuality,
                 to: newQuality,
                 latencyMs: latencyMonitor.currentLatencyMs ?? 0
             )
