@@ -2,6 +2,9 @@
 
 A native macOS menu bar app that shows **live internet latency** and **connection type** at a glance. Built for travellers who want to monitor their internet quality on trains, in cafes, or wherever they roam.
 
+## Screenshots
+<img width="297" height="277" alt="image" src="https://github.com/user-attachments/assets/e5276b4b-1d09-4c10-8d96-387403383ed4" />
+
 ## What It Does
 
 - Shows real-time ping latency in the menu bar (e.g. `42ms`)
