@@ -3,9 +3,30 @@ name: Release
 on:
   push:
     branches: ["release/v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. 1.2.0)"
+        required: true
+        type: string
+      draft:
+        description: "Create as draft release"
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: "Mark as pre-release"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+  pull-requests: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -14,14 +35,48 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Extract version from branch name
+      - name: Extract version
         id: version
         run: |
-          VERSION="${GITHUB_REF#refs/heads/release/v}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/heads/release/v}"
+          fi
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "::error::Invalid version format: $VERSION (expected semver like 1.2.3)"
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           echo "Detected version: $VERSION (tag: v$VERSION)"
+
+      - name: Check tag does not already exist
+        run: |
+          if git rev-parse "refs/tags/${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "::error::Tag ${{ steps.version.outputs.tag }} already exists"
+            exit 1
+          fi
+
+      - name: Stamp version into Info.plist
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Resources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" Resources/Info.plist
+          echo "Stamped Info.plist: version=$VERSION build=${{ github.run_number }}"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" Resources/Info.plist
+
+      - name: Cache Swift build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: swift-release-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved', 'Sources/**/*.swift') }}
+          restore-keys: |
+            swift-release-${{ runner.os }}-
 
       - name: Run tests
         run: swift test
@@ -32,13 +87,39 @@ jobs:
       - name: Create DMG
         run: ./scripts/create-dmg.sh
 
+      - name: Generate checksums
+        id: checksums
+        run: |
+          cd build
+          shasum -a 256 NetworkBadge.dmg > NetworkBadge.dmg.sha256
+          cat NetworkBadge.dmg.sha256
+          CHECKSUM=$(awk '{print $1}' NetworkBadge.dmg.sha256)
+          echo "sha256=$CHECKSUM" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetworkBadge-${{ steps.version.outputs.tag }}
+          path: |
+            build/NetworkBadge.dmg
+            build/NetworkBadge.dmg.sha256
+            build/NetworkBadge.app
+          retention-days: 90
+
       - name: Create and push tag
         run: |
-          if git rev-parse "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
-            echo "Tag ${{ steps.version.outputs.tag }} already exists, skipping"
+          git tag "${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Determine release flags
+        id: flags
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "draft=${{ github.event.inputs.draft }}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=${{ github.event.inputs.prerelease }}" >> "$GITHUB_OUTPUT"
           else
-            git tag "${{ steps.version.outputs.tag }}"
-            git push origin "${{ steps.version.outputs.tag }}"
+            echo "draft=false" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create GitHub Release
@@ -46,7 +127,42 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Network Badge ${{ steps.version.outputs.tag }}
-          draft: false
-          prerelease: false
+          draft: ${{ steps.flags.outputs.draft }}
+          prerelease: ${{ steps.flags.outputs.prerelease }}
           generate_release_notes: true
-          files: build/NetworkBadge.dmg
+          body: |
+            ## Installation
+
+            Download `NetworkBadge.dmg`, open it, and drag Network Badge to Applications.
+
+            ## Verify download
+
+            ```
+            shasum -a 256 NetworkBadge.dmg
+            ```
+            Expected: `${{ steps.checksums.outputs.sha256 }}`
+          files: |
+            build/NetworkBadge.dmg
+            build/NetworkBadge.dmg.sha256
+
+      - name: Create merge-back PR
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="${GITHUB_REF#refs/heads/}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Resources/Info.plist
+          git commit -m "chore: stamp version ${{ steps.version.outputs.version }}" || true
+          git push origin "$BRANCH"
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore: merge ${{ steps.version.outputs.tag }} back to main" \
+            --body "Automated PR to merge release branch back to main after ${{ steps.version.outputs.tag }} release.
+
+          This PR includes the version stamp in Info.plist.
+
+          After merging, the release branch can be deleted." \
+            || echo "PR already exists or could not be created"
