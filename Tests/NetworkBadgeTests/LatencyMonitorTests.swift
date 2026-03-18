@@ -187,12 +187,10 @@ final class LatencyMonitorTests: XCTestCase {
     /// Verify custom configuration is respected
     func testCustomConfiguration() {
         let monitor = LatencyMonitor(
-            interval: 5.0,
             timeout: 15.0,
             maxSamples: 50
         )
 
-        XCTAssertEqual(monitor.measurementInterval, 5.0)
         XCTAssertEqual(monitor.timeoutInterval, 15.0)
         XCTAssertEqual(monitor.maxSampleCount, 50)
     }

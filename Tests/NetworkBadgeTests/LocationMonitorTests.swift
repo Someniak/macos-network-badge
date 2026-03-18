@@ -27,12 +27,12 @@ final class LocationMonitorTests: XCTestCase {
 
     // MARK: - Tests
 
-    /// .authorizedWhenInUse + tracking enabled → isAuthorized=true, isTracking=true
+    /// .authorized + tracking enabled → isAuthorized=true, isTracking=true
     func testAuthorizedWhenInUseStartsTracking() {
         let monitor = makeMonitor()
         monitor.isTrackingEnabled = true
 
-        monitor.apply(authorizationStatus: .authorizedWhenInUse)
+        monitor.apply(authorizationStatus: .authorized)
         waitForMainQueue()
 
         XCTAssertTrue(monitor.isAuthorized)
@@ -74,13 +74,13 @@ final class LocationMonitorTests: XCTestCase {
         XCTAssertFalse(monitor.isTracking)
     }
 
-    /// .authorizedWhenInUse + tracking disabled → isAuthorized=true, isTracking=false
+    /// .authorized + tracking disabled → isAuthorized=true, isTracking=false
     func testAuthorizedButTrackingDisabledDoesNotStart() {
         let monitor = makeMonitor()
         // isTrackingEnabled defaults to false — do NOT set it to avoid triggering
         // requestWhenInUseAuthorization() which hits the real CLLocationManager.
 
-        monitor.apply(authorizationStatus: .authorizedWhenInUse)
+        monitor.apply(authorizationStatus: .authorized)
         waitForMainQueue()
 
         XCTAssertTrue(monitor.isAuthorized)
