@@ -216,8 +216,8 @@ final class LocationIntelligence: ObservableObject {
     // MARK: - Bearing
 
     /// Update the current bearing based on movement between two locations.
-    /// Must be called on `queue`.
-    private func _updateBearing(from oldLocation: CLLocation, to newLocation: CLLocation) {
+    /// Must be called on the main thread.
+    func updateBearing(from oldLocation: CLLocation, to newLocation: CLLocation) {
         let lat1 = oldLocation.coordinate.latitude * .pi / 180
         let lat2 = newLocation.coordinate.latitude * .pi / 180
         let dLon = (newLocation.coordinate.longitude - oldLocation.coordinate.longitude) * .pi / 180
@@ -226,24 +226,18 @@ final class LocationIntelligence: ObservableObject {
         let x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
         var bearing = atan2(y, x) * 180 / .pi
         if bearing < 0 { bearing += 360 }
-        DispatchQueue.main.async { [weak self] in
-            self?.currentBearing = bearing
-        }
-    }
-
-    func updateBearing(from oldLocation: CLLocation, to newLocation: CLLocation) {
-        queue.sync { _updateBearing(from: oldLocation, to: newLocation) }
+        currentBearing = bearing
     }
 
     // MARK: - Anchor Management
 
     /// Record a validated location as the latest anchor point.
-    /// Updates speed buffer and bearing.
+    /// Updates speed buffer and bearing. Must be called on the main thread.
     func recordAnchor(_ location: CLLocation) {
+        if let prev = queue.sync(execute: { lastKnownLocation }) {
+            updateBearing(from: prev, to: location)
+        }
         queue.sync {
-            if let prev = lastKnownLocation {
-                _updateBearing(from: prev, to: location)
-            }
             let time = location.timestamp
             recentLocations.append((location: location, time: time))
             if recentLocations.count > 10 { recentLocations.removeFirst() }
