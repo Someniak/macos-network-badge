@@ -172,13 +172,15 @@ struct TrailMapView: NSViewRepresentable {
             return nil
         }
 
-        func mapView(_ mapView: MKMapView, didSelect annotation: MKAnnotation) {
-            if let qualityAnnotation = annotation as? QualityAnnotation {
+        func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
+            if let qualityAnnotation = view.annotation as? QualityAnnotation {
                 DispatchQueue.main.async {
                     self.parent.selectedRecord = qualityAnnotation.record
                 }
             }
-            mapView.deselectAnnotation(annotation, animated: false)
+            if let annotation = view.annotation {
+                mapView.deselectAnnotation(annotation, animated: false)
+            }
         }
 
         func mapViewDidChangeVisibleRegion(_ mapView: MKMapView) {

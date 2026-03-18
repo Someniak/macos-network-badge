@@ -59,7 +59,7 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     private let database: QualityDatabase
 
     /// Smart location processing (Kalman filter, backpropagation, outlier detection)
-    let intelligence: LocationIntelligence
+    var intelligence: LocationIntelligence
 
     /// References to other monitors for reading current state
     private weak var networkMonitor: NetworkMonitor?
