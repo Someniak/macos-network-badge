@@ -171,17 +171,17 @@ final class ConnectionInfoTests: XCTestCase {
 
     /// Verify RSSI values map to correct signal quality levels
     func testWiFiSignalQualityThresholds() {
-        // Excellent: > -50 dBm
+        // Excellent: >= -50 dBm
         XCTAssertEqual(WiFiSignalQuality.from(rssi: -30), .excellent)
-        XCTAssertEqual(WiFiSignalQuality.from(rssi: -49), .excellent)
+        XCTAssertEqual(WiFiSignalQuality.from(rssi: -50), .excellent)
 
-        // Good: -50 to -60 dBm
-        XCTAssertEqual(WiFiSignalQuality.from(rssi: -50), .good)
-        XCTAssertEqual(WiFiSignalQuality.from(rssi: -59), .good)
+        // Good: -51 to -60 dBm
+        XCTAssertEqual(WiFiSignalQuality.from(rssi: -51), .good)
+        XCTAssertEqual(WiFiSignalQuality.from(rssi: -60), .good)
 
-        // Fair: -60 to -70 dBm
-        XCTAssertEqual(WiFiSignalQuality.from(rssi: -60), .fair)
-        XCTAssertEqual(WiFiSignalQuality.from(rssi: -69), .fair)
+        // Fair: -61 to -70 dBm
+        XCTAssertEqual(WiFiSignalQuality.from(rssi: -61), .fair)
+        XCTAssertEqual(WiFiSignalQuality.from(rssi: -70), .fair)
 
         // Weak: < -70 dBm
         XCTAssertEqual(WiFiSignalQuality.from(rssi: -71), .weak)

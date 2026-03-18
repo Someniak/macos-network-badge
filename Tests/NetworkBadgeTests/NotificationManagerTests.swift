@@ -63,7 +63,7 @@ final class NotificationManagerTests: XCTestCase {
         let manager = NotificationManager(cooldown: 0)
         manager.notificationsEnabled = false
 
-        manager.notifyQualityDrop(from: .good, to: .poor, latencyMs: 200)
+        manager.notifyQualityDrop(to: .poor, latencyMs: 200)
 
         // lastNotificationDate stays nil because notification was suppressed
         XCTAssertNil(manager.lastNotificationDate)
@@ -75,7 +75,7 @@ final class NotificationManagerTests: XCTestCase {
         manager.notificationsEnabled = true
 
         // Improvement: poor → good — should not fire
-        manager.notifyQualityDrop(from: .poor, to: .good, latencyMs: 50)
+        manager.notifyQualityDrop(to: .good, latencyMs: 50)
         XCTAssertNil(manager.lastNotificationDate)
     }
 
@@ -85,7 +85,7 @@ final class NotificationManagerTests: XCTestCase {
         manager.notificationsEnabled = true
 
         // excellent → fair is degradation, but fair isn't poor/bad
-        manager.notifyQualityDrop(from: .excellent, to: .fair, latencyMs: 100)
+        manager.notifyQualityDrop(to: .fair, latencyMs: 100)
         XCTAssertNil(manager.lastNotificationDate)
     }
 

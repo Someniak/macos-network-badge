@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    branches: ["release/v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Release
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from branch name
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/heads/release/v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Detected version: $VERSION (tag: v$VERSION)"
+
+      - name: Run tests
+        run: swift test
+
+      - name: Build .app bundle
+        run: ./scripts/build-app.sh
+
+      - name: Create DMG
+        run: ./scripts/create-dmg.sh
+
+      - name: Create and push tag
+        run: |
+          if git rev-parse "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Tag ${{ steps.version.outputs.tag }} already exists, skipping"
+          else
+            git tag "${{ steps.version.outputs.tag }}"
+            git push origin "${{ steps.version.outputs.tag }}"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Network Badge ${{ steps.version.outputs.tag }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: build/NetworkBadge.dmg
