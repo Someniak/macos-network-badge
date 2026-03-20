@@ -155,8 +155,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         self.cooldownInterval = cooldown
         self.notificationsEnabled = UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? true
         self.latencyAlertsEnabled = UserDefaults.standard.object(forKey: Self.latencyKey) as? Bool ?? true
-        self.disconnectionAlertsEnabled = UserDefaults.standard.object(forKey: Self.disconnectionKey) as? Bool ?? true
-        self.predictionAlertsEnabled = UserDefaults.standard.object(forKey: Self.predictionKey) as? Bool ?? true
+        self.disconnectionAlertsEnabled = UserDefaults.standard.object(forKey: Self.disconnectionKey) as? Bool ?? false
+        self.predictionAlertsEnabled = UserDefaults.standard.object(forKey: Self.predictionKey) as? Bool ?? false
         super.init()
     }
 

@@ -62,6 +62,7 @@ final class NotificationManagerTests: XCTestCase {
     func testWifiToDisconnectedFires() {
         let manager = NotificationManager(cooldown: 0)
         manager.notificationsEnabled = true
+        manager.disconnectionAlertsEnabled = true
 
         // Simulate arriving on WiFi first
         manager.notifyConnectionChange(to: .wifi)
@@ -76,6 +77,7 @@ final class NotificationManagerTests: XCTestCase {
     func testEthernetToDisconnectedFires() {
         let manager = NotificationManager(cooldown: 0)
         manager.notificationsEnabled = true
+        manager.disconnectionAlertsEnabled = true
 
         manager.notifyConnectionChange(to: .ethernet)
         manager.notifyConnectionChange(to: .disconnected)
@@ -86,6 +88,7 @@ final class NotificationManagerTests: XCTestCase {
     func testReconnectionDoesNotFire() {
         let manager = NotificationManager(cooldown: 0)
         manager.notificationsEnabled = true
+        manager.disconnectionAlertsEnabled = true
 
         manager.notifyConnectionChange(to: .disconnected)
         XCTAssertNil(manager.lastNotificationDate)
@@ -98,6 +101,7 @@ final class NotificationManagerTests: XCTestCase {
     func testNonPrimaryToDisconnectedDoesNotFire() {
         let manager = NotificationManager(cooldown: 0)
         manager.notificationsEnabled = true
+        manager.disconnectionAlertsEnabled = true
 
         manager.notifyConnectionChange(to: .loopback)
         manager.notifyConnectionChange(to: .disconnected)
@@ -108,6 +112,7 @@ final class NotificationManagerTests: XCTestCase {
     func testConnectionLostCooldownApplies() {
         let manager = NotificationManager(cooldown: 60)
         manager.notificationsEnabled = true
+        manager.disconnectionAlertsEnabled = true
 
         // First: wifi → disconnected fires
         manager.notifyConnectionChange(to: .wifi)
@@ -159,6 +164,7 @@ final class NotificationManagerTests: XCTestCase {
     func testPoorPredictionFires() {
         let manager = NotificationManager(cooldown: 0)
         manager.notificationsEnabled = true
+        manager.predictionAlertsEnabled = true
 
         let prediction = QualityPrediction(
             expectedQuality: .poor, confidence: 0.8,
@@ -173,6 +179,7 @@ final class NotificationManagerTests: XCTestCase {
     func testGoodPredictionDoesNotFire() {
         let manager = NotificationManager(cooldown: 0)
         manager.notificationsEnabled = true
+        manager.predictionAlertsEnabled = true
 
         let prediction = QualityPrediction(
             expectedQuality: .good, confidence: 0.9,
@@ -186,6 +193,7 @@ final class NotificationManagerTests: XCTestCase {
     func testLowConfidencePredictionDoesNotFire() {
         let manager = NotificationManager(cooldown: 0)
         manager.notificationsEnabled = true
+        manager.predictionAlertsEnabled = true
 
         let prediction = QualityPrediction(
             expectedQuality: .bad, confidence: 0.3,
@@ -199,6 +207,7 @@ final class NotificationManagerTests: XCTestCase {
     func testPredictionDoesNotFireTwice() {
         let manager = NotificationManager(cooldown: 0)
         manager.notificationsEnabled = true
+        manager.predictionAlertsEnabled = true
 
         let prediction = QualityPrediction(
             expectedQuality: .bad, confidence: 0.8,
@@ -217,6 +226,7 @@ final class NotificationManagerTests: XCTestCase {
     func testPredictionResetsAfterClearing() {
         let manager = NotificationManager(cooldown: 0)
         manager.notificationsEnabled = true
+        manager.predictionAlertsEnabled = true
 
         let prediction = QualityPrediction(
             expectedQuality: .bad, confidence: 0.8,
