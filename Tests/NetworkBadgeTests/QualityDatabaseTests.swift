@@ -41,7 +41,12 @@ final class QualityDatabaseTests: XCTestCase {
             wifiSSID: "TestNetwork",
             wifiRSSI: -55,
             interfaceName: "en0",
-            locationSource: locationSource
+            locationSource: locationSource,
+            speedKmh: nil,
+            altitude: nil,
+            jitter: nil,
+            packetLossRatio: nil,
+            courseChangeRate: nil
         )
     }
 
@@ -106,7 +111,12 @@ final class QualityDatabaseTests: XCTestCase {
             wifiSSID: nil,
             wifiRSSI: nil,
             interfaceName: "pdp_ip0",
-            locationSource: "CoreLocation"
+            locationSource: "CoreLocation",
+            speedKmh: 85.0,
+            altitude: 142.5,
+            jitter: 12.3,
+            packetLossRatio: 0.1,
+            courseChangeRate: 3.5
         )
 
         db.insert(original)
@@ -124,6 +134,11 @@ final class QualityDatabaseTests: XCTestCase {
         XCTAssertNil(retrieved.wifiRSSI)
         XCTAssertEqual(retrieved.interfaceName, original.interfaceName)
         XCTAssertEqual(retrieved.locationSource, original.locationSource)
+        XCTAssertEqual(retrieved.speedKmh!, 85.0, accuracy: 0.1)
+        XCTAssertEqual(retrieved.altitude!, 142.5, accuracy: 0.1)
+        XCTAssertEqual(retrieved.jitter!, 12.3, accuracy: 0.1)
+        XCTAssertEqual(retrieved.packetLossRatio!, 0.1, accuracy: 0.01)
+        XCTAssertEqual(retrieved.courseChangeRate!, 3.5, accuracy: 0.1)
     }
 
     /// Update method should modify location fields of an existing record

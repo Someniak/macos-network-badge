@@ -34,6 +34,15 @@ struct QualityMapView: View {
     /// Location monitor for live position updates
     @ObservedObject var locationMonitor: LocationMonitor
 
+    /// Latency monitor for ping status
+    @ObservedObject var latencyMonitor: LatencyMonitor
+
+    /// Network monitor for connection info
+    @ObservedObject var networkMonitor: NetworkMonitor
+
+    /// Controller for opening the data browser window
+    var dataBrowserController: DataBrowserWindowController?
+
     /// Current user location (from LocationMonitor, live-updating)
     private var currentLatitude: Double? { locationMonitor.latitude }
     private var currentLongitude: Double? { locationMonitor.longitude }
@@ -60,11 +69,20 @@ struct QualityMapView: View {
     /// Time filter: how far back to show records
     @State private var timeFilter: TimeFilter = .allTime
 
-    /// Quality filter: minimum quality to show
-    @State private var qualityFilter: QualityFilter = .all
-
     /// Total record count in database
     @State private var totalRecords: Int = 0
+
+    /// Detected runs from loaded records
+    @State private var runs: [Run] = []
+
+    /// Selected run ID (nil = all runs)
+    @State private var runFilter: Int? = nil
+
+    /// Whether the initial region has been set (prevents resetting on incremental updates)
+    @State private var hasSetInitialRegion: Bool = false
+
+    /// Incremented to signal a programmatic region change to TrailMapView
+    @State private var regionToken: Int = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -74,10 +92,33 @@ struct QualityMapView: View {
 
             // ── Controls Bar ──────────────────────────────
             controlsBar
+
+            // ── Status Bar ──────────────────────────────────
+            statusBar
         }
         .onAppear {
             loadRecords()
         }
+        .onChange(of: locationMonitor.sessionRecordCount) { _ in
+            loadRecords()
+        }
+    }
+
+    // MARK: - Run Filtering
+
+    /// Records filtered by the selected run
+    private var filteredRecords: [QualityRecord] {
+        guard let runID = runFilter,
+              let run = runs.first(where: { $0.id == runID }) else {
+            return records
+        }
+        return records.filter { run.recordIDs.contains($0.id) }
+    }
+
+    /// Segments filtered by the selected run (rebuild trail from filtered records)
+    private var filteredSegments: [TrailSegment] {
+        guard runFilter != nil else { return segments }
+        return QualityTrailBuilder.buildTrail(from: filteredRecords)
     }
 
     // MARK: - Map Content
@@ -88,13 +129,14 @@ struct QualityMapView: View {
     @ViewBuilder
     private var mapContent: some View {
         TrailMapView(
-            records: records,
-            segments: segments,
+            records: filteredRecords,
+            segments: filteredSegments,
             currentLatitude: currentLatitude,
             currentLongitude: currentLongitude,
             currentBearing: currentBearing,
             region: $region,
-            selectedRecord: $selectedRecord
+            selectedRecord: $selectedRecord,
+            regionToken: regionToken
         )
         .overlay(alignment: .topTrailing) {
             // Record count badge
@@ -115,7 +157,7 @@ struct QualityMapView: View {
 
     /// Shows how many records are visible vs total
     private var recordCountBadge: some View {
-        Text("\(records.count) of \(totalRecords) records")
+        Text("\(filteredRecords.count) of \(totalRecords) records")
             .font(.caption)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
@@ -138,34 +180,148 @@ struct QualityMapView: View {
             .frame(maxWidth: 300)
             .onChange(of: timeFilter) { _ in loadRecords() }
 
-            Spacer()
-
-            // Quality filter — dropdown to show only poor/bad areas
-            Picker("Quality", selection: $qualityFilter) {
-                ForEach(QualityFilter.allCases, id: \.self) { filter in
-                    Text(filter.label).tag(filter)
+            // Run filter — select individual journeys
+            Picker("Run", selection: $runFilter) {
+                Text("All Runs").tag(nil as Int?)
+                ForEach(runs) { run in
+                    Text(runPickerLabel(run)).tag(run.id as Int?)
                 }
             }
-            .frame(width: 120)
-            .onChange(of: qualityFilter) { _ in loadRecords() }
+            .frame(width: 200)
 
-            // Refresh button — reload records from database
-            Button(action: loadRecords) {
-                Image(systemName: "arrow.clockwise")
+            Spacer()
+
+            // Data browser — opens the Excel-like record viewer
+            if let controller = dataBrowserController {
+                Button(action: { controller.showWindow() }) {
+                    Image(systemName: "tablecells")
+                }
+                .buttonStyle(.bordered)
+                .help("Browse all records")
             }
-            .help("Reload records from database")
 
             // Center on user — only shown when GPS is active
             if currentLatitude != nil && currentLongitude != nil {
                 Button(action: centerOnUser) {
                     Image(systemName: "location")
                 }
+                .buttonStyle(.bordered)
                 .help("Center on current location")
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(.bar)
+    }
+
+    // MARK: - Status Bar
+
+    /// Bottom status line showing live operational state
+    private var statusBar: some View {
+        HStack(spacing: 0) {
+            // Location source
+            Text(locationSourceLabel)
+
+            Text(" · ").foregroundColor(.secondary.opacity(0.5))
+
+            // Last ping
+            Text(lastPingLabel)
+
+            Text(" · ").foregroundColor(.secondary.opacity(0.5))
+
+            // Connection
+            Text(connectionLabel)
+
+            Text(" · ").foregroundColor(.secondary.opacity(0.5))
+
+            // Session count
+            Text("\(locationMonitor.sessionRecordCount) records")
+
+            // Speed
+            Text(" · ").foregroundColor(.secondary.opacity(0.5))
+            if locationMonitor.intelligence.isSpeedEstimated {
+                Text("~\(Int(locationMonitor.intelligence.currentSpeedKmh)) km/h")
+            } else {
+                Text("\(Int(locationMonitor.intelligence.currentSpeedKmh)) km/h")
+            }
+
+            // Lookahead prediction
+            if let prediction = locationMonitor.intelligence.lookaheadPrediction,
+               prediction.confidence >= 0.3 {
+                Text(" · ").foregroundColor(.secondary.opacity(0.5))
+                switch prediction.expectedQuality {
+                case .poor, .bad:
+                    Text("\u{26A0} \(prediction.expectedQuality.rawValue) in ~\(Int(prediction.minutesAhead)) min")
+                        .foregroundColor(.orange)
+                case .excellent, .good:
+                    Text("Good ahead")
+                        .foregroundColor(.green)
+                default:
+                    EmptyView()
+                }
+            }
+
+            Spacer()
+        }
+        .font(.caption)
+        .foregroundColor(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .background(.bar)
+    }
+
+    /// Describes which location source is active
+    private var locationSourceLabel: String {
+        let gps = locationMonitor.gps2ip
+        if !locationMonitor.isTrackingEnabled {
+            return "Not tracking"
+        }
+        if !locationMonitor.isAuthorized {
+            return "No authorization"
+        }
+        if gps.isConnected {
+            let via = gps.activeEndpoint?.displayLabel ?? ""
+            if let fix = gps.lastFixAt {
+                let ago = Int(-fix.timeIntervalSinceNow)
+                return "GPS2IP \(via) · fix \(ago)s ago"
+            }
+            return "GPS2IP \(via) · no fix yet"
+        }
+        if gps.isEnabled {
+            if let err = gps.errorMessage {
+                return "GPS2IP · \(err)"
+            }
+            return "GPS2IP · connecting…"
+        }
+        if locationMonitor.isTracking {
+            return "CoreLocation"
+        }
+        return "Waiting…"
+    }
+
+    /// Describes the last ping measurement
+    private var lastPingLabel: String {
+        if latencyMonitor.isMeasuring {
+            return "Measuring…"
+        }
+        if let latency = latencyMonitor.currentLatencyMs,
+           let lastSample = latencyMonitor.samples.first {
+            let ago = Int(-lastSample.timestamp.timeIntervalSinceNow)
+            return "\(Int(latency)) ms · \(ago)s ago"
+        }
+        return "Idle"
+    }
+
+    /// Describes the current network connection
+    private var connectionLabel: String {
+        if !networkMonitor.isConnected {
+            return "Disconnected"
+        }
+        let type = networkMonitor.connectionType.rawValue
+        if let ssid = networkMonitor.wifiSSID {
+            return "\(type) (\(ssid))"
+        }
+        return type
     }
 
     // MARK: - Record Detail Card
@@ -240,34 +396,34 @@ struct QualityMapView: View {
     private func loadRecords() {
         let db = database
         let tFilter = timeFilter
-        let qFilter = qualityFilter
 
         Task.detached {
             let count = db.recordCount()
 
-            var filtered: [QualityRecord]
+            var allRecords: [QualityRecord]
             if let startDate = tFilter.startDate {
-                filtered = db.queryTimeRange(from: startDate, to: Date())
+                allRecords = db.queryTimeRange(from: startDate, to: Date())
             } else {
-                filtered = db.queryAll()
+                allRecords = db.queryAll()
             }
 
-            if qFilter != .all {
-                filtered = filtered.filter { record in
-                    qFilter.matches(quality: record.quality)
-                }
-            }
+            let builtSegments = QualityTrailBuilder.buildTrail(from: allRecords)
 
-            let builtSegments = QualityTrailBuilder.buildTrail(from: filtered)
-            let visibleRecords = filtered.filter { record in
+            let visibleRecords = allRecords.filter { record in
                 record.locationSourceLevel != .none &&
                 (record.latitude != 0 && record.longitude != 0)
             }
+
+            let detectedRuns = RunDetector.detectRuns(from: allRecords)
 
             await MainActor.run {
                 totalRecords = count
                 segments = builtSegments
                 records = visibleRecords
+                runs = detectedRuns
+                if let selected = runFilter, !detectedRuns.contains(where: { $0.id == selected }) {
+                    runFilter = nil
+                }
                 updateRegionIfNeeded()
             }
         }
@@ -280,22 +436,25 @@ struct QualityMapView: View {
                 center: CLLocationCoordinate2D(latitude: lat, longitude: lon),
                 span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
             )
+            regionToken += 1
         }
     }
 
-    /// Sets initial map region based on available data.
-    /// Priority: current location > fit all records > Brussels default
+    /// Sets the map region once on first load. Subsequent reloads preserve
+    /// the user's manual pan/zoom.
     private func updateRegionIfNeeded() {
-        // If we have a current location, center there
+        guard !hasSetInitialRegion else { return }
+
         if let lat = currentLatitude, let lon = currentLongitude {
             region = MKCoordinateRegion(
                 center: CLLocationCoordinate2D(latitude: lat, longitude: lon),
                 span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
             )
+            regionToken += 1
+            hasSetInitialRegion = true
             return
         }
 
-        // Otherwise, fit all records in view
         guard !records.isEmpty else { return }
 
         let lats = records.map { $0.latitude }
@@ -313,6 +472,17 @@ struct QualityMapView: View {
             center: CLLocationCoordinate2D(latitude: centerLat, longitude: centerLon),
             span: MKCoordinateSpan(latitudeDelta: spanLat, longitudeDelta: spanLon)
         )
+        regionToken += 1
+        hasSetInitialRegion = true
+    }
+
+    /// Formats a run label for the picker dropdown
+    private func runPickerLabel(_ run: Run) -> String {
+        let tf = DateFormatter()
+        tf.dateFormat = "HH:mm"
+        let start = tf.string(from: run.startTime)
+        let end = tf.string(from: run.endTime)
+        return "Run \(run.id) — \(start)–\(end) (\(run.recordCount))"
     }
 
     /// Returns the SF Symbol name for a connection type string.
@@ -368,27 +538,35 @@ enum TimeFilter: CaseIterable {
 /// Used in the map's control bar to focus on problematic areas.
 enum QualityFilter: CaseIterable {
     case all
-    case poorAndBelow
-    case badOnly
+    case excellent
+    case good
+    case fair
+    case poor
+    case bad
 
     /// Label for the dropdown picker
     var label: String {
         switch self {
-        case .all:           return "All"
-        case .poorAndBelow:  return "Poor+"
-        case .badOnly:       return "Bad only"
+        case .all:       return "All"
+        case .excellent: return "Excellent"
+        case .good:      return "Good"
+        case .fair:      return "Fair"
+        case .poor:      return "Poor"
+        case .bad:       return "Bad"
         }
     }
 
-    /// Returns true if a record's quality string matches this filter
-    func matches(quality: String) -> Bool {
+    /// Returns true if a quality level matches this filter.
+    /// Cumulative: selecting "Fair" shows Excellent + Good + Fair
+    /// (all levels up to and including the selected one).
+    func matches(_ quality: LatencyQuality) -> Bool {
         switch self {
-        case .all:
-            return true
-        case .poorAndBelow:
-            return quality == "Poor" || quality == "Bad"
-        case .badOnly:
-            return quality == "Bad"
+        case .all:       return true
+        case .excellent: return quality == .excellent
+        case .good:      return quality == .excellent || quality == .good
+        case .fair:      return quality == .excellent || quality == .good || quality == .fair
+        case .poor:      return quality == .excellent || quality == .good || quality == .fair || quality == .poor
+        case .bad:       return true  // all levels including bad
         }
     }
 }

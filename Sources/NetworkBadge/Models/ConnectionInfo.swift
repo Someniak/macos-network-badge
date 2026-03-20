@@ -148,6 +148,7 @@ enum LocationSource: String, Equatable, Sendable {
     case coreLocation  = "CoreLocation"     // Good GPS/Wi-Fi fix (accuracy <= 200m)
     case lowAccuracy   = "Low Accuracy"     // CoreLocation but accuracy > 200m
     case ipGeolocation = "IP Geolocation"   // Fallback from IP geolocation API
+    case gps2ip        = "GPS2IP"           // iPhone GPS via GPS2IP app
     case interpolated  = "Interpolated"     // Backpropagated from speed estimation
     case none          = "None"             // No location available
 }
@@ -170,6 +171,22 @@ struct LatencySample: Identifiable, Equatable, Sendable {
             return "Timeout"
         }
     }
+}
+
+// MARK: - Quality Prediction
+
+/// Spatial lookahead prediction based on historical records ahead.
+struct QualityPrediction: Equatable {
+    /// Expected quality at the projected position
+    let expectedQuality: LatencyQuality
+    /// Confidence in the prediction (0-1), based on sample count and age
+    let confidence: Double
+    /// How many minutes ahead this prediction covers
+    let minutesAhead: Double
+    /// Number of historical records used for prediction
+    let sampleCount: Int
+    /// Weighted average latency at the projected position
+    let averageLatencyMs: Double
 }
 
 // MARK: - Connection Snapshot

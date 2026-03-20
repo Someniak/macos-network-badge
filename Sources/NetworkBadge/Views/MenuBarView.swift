@@ -36,6 +36,9 @@ struct MenuBarView: View {
     /// Controls the settings window
     @ObservedObject var settingsWindowController: SettingsWindowController
 
+    /// Checks GitHub Releases for app updates
+    @ObservedObject var updateChecker: UpdateChecker
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
 
@@ -129,39 +132,50 @@ struct MenuBarView: View {
     /// GPS status on the left; Show Map, Settings, Quit on the right — all on one line.
     private var bottomRow: some View {
         HStack(spacing: 6) {
-            // GPS status indicator
-            if locationMonitor.isTracking {
-                Image(systemName: "location.fill")
-                    .font(.caption)
-                    .foregroundColor(.green)
-                Text("Tracking")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                if locationMonitor.sessionRecordCount > 0 {
-                    Text("(\(locationMonitor.sessionRecordCount) pts)")
+            if locationMonitor.isTrackingEnabled {
+                // GPS status indicator
+                if locationMonitor.isTracking {
+                    Image(systemName: "location.fill")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                    Text("Tracking")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    if locationMonitor.sessionRecordCount > 0 {
+                        Text("(\(locationMonitor.sessionRecordCount) pts)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                } else if !locationMonitor.isAuthorized {
+                    Image(systemName: "location.slash")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                    Text("Location off")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } else {
+                    Image(systemName: "location")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text("Waiting for GPS")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
-            } else if !locationMonitor.isAuthorized {
-                Image(systemName: "location.slash")
-                    .font(.caption)
-                    .foregroundColor(.orange)
-                Text("Location off")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            } else {
-                Image(systemName: "location")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Text("Waiting for GPS")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
             }
 
             Spacer()
 
-            HoverIconButton(icon: "map", hoverColor: .accentColor, action: { mapWindowController.showWindow() })
-                .help("Show Map")
+            if updateChecker.updateAvailable, let url = updateChecker.releaseURL {
+                HoverTextButton(label: "Update Available") {
+                    NSWorkspace.shared.open(url)
+                }
+                .help("Open GitHub release page")
+            }
+
+            if locationMonitor.isTrackingEnabled {
+                HoverIconButton(icon: "map", hoverColor: .accentColor, action: { mapWindowController.showWindow() })
+                    .help("Show Map")
+            }
             HoverIconButton(icon: "gear", hoverColor: .primary, action: { settingsWindowController.showWindow() })
                 .help("Settings")
             HoverIconButton(icon: "power", hoverColor: .red, action: { NSApplication.shared.terminate(nil) })

@@ -59,6 +59,50 @@ This is useful for:
 - Releasing pre-release versions (e.g., `1.2.0-beta.1`)
 - Triggering a release from any branch without the `release/v*` naming convention
 
+## Writing Release Notes
+
+Before cutting a release, update `CHANGELOG.md` with the new version's changes:
+
+### 1. Add a new version section
+
+Add a new `## [X.Y.Z] — YYYY-MM-DD` section at the top of `CHANGELOG.md` (below the header, above the previous version).
+
+### 2. Categorize changes
+
+Use these subsections as needed:
+
+- **Added** — new features and capabilities
+- **Changed** — modifications to existing behavior
+- **Fixed** — bug fixes
+- **Removed** — features or code that was removed
+- **Security** — vulnerability fixes
+
+### 3. Writing guidelines
+
+- Lead each item with a **bold label** summarizing the feature, then a dash and description
+- Be specific enough that a user understands what changed, but keep it concise
+- Group related items together (e.g., all GPS features near each other)
+- Reference user-facing behavior, not internal implementation details
+- Don't list every commit — group related commits into a single changelog entry
+
+### 4. Example
+
+```markdown
+## [1.2.0] — 2026-04-15
+
+### Added
+
+- **Export to CSV** — export quality records from the data browser as CSV files
+
+### Fixed
+
+- Map tiles not loading on first launch when offline
+```
+
+The GitHub Release will also auto-generate commit-level notes via `generate_release_notes: true` in the workflow, so the changelog should focus on the user-facing summary.
+
+---
+
 ## Versioning
 
 This project uses [Semantic Versioning](https://semver.org/):

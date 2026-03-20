@@ -15,15 +15,18 @@ final class SettingsWindowController: ObservableObject {
     private weak var notificationManager: NotificationManager?
     private weak var locationMonitor: LocationMonitor?
     private weak var latencyMonitor: LatencyMonitor?
+    private weak var updateChecker: UpdateChecker?
 
     init(
         notificationManager: NotificationManager,
         locationMonitor: LocationMonitor,
-        latencyMonitor: LatencyMonitor
+        latencyMonitor: LatencyMonitor,
+        updateChecker: UpdateChecker
     ) {
         self.notificationManager = notificationManager
         self.locationMonitor = locationMonitor
         self.latencyMonitor = latencyMonitor
+        self.updateChecker = updateChecker
     }
 
     func showWindow() {
@@ -35,12 +38,14 @@ final class SettingsWindowController: ObservableObject {
 
         guard let nm = notificationManager,
               let lm = locationMonitor,
-              let lat = latencyMonitor else { return }
+              let lat = latencyMonitor,
+              let uc = updateChecker else { return }
 
         let settingsView = SettingsView(
             notificationManager: nm,
             locationMonitor: lm,
-            latencyMonitor: lat
+            latencyMonitor: lat,
+            updateChecker: uc
         )
 
         let hostingController = NSHostingController(rootView: settingsView)
@@ -54,7 +59,11 @@ final class SettingsWindowController: ObservableObject {
 
         newWindow.title = "Settings"
         newWindow.contentViewController = hostingController
-        newWindow.setContentSize(hostingController.view.fittingSize)
+        let fitting = hostingController.view.fittingSize
+        let maxHeight: CGFloat = 600
+        newWindow.setContentSize(NSSize(width: fitting.width, height: min(fitting.height, maxHeight)))
+        newWindow.contentMinSize = NSSize(width: fitting.width, height: 300)
+        newWindow.contentMaxSize = NSSize(width: fitting.width, height: maxHeight)
         newWindow.isReleasedWhenClosed = false
         newWindow.center()
 

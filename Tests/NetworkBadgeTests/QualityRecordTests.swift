@@ -114,7 +114,12 @@ final class QualityRecordTests: XCTestCase {
             wifiSSID: nil,
             wifiRSSI: nil,
             interfaceName: "en0",
-            locationSource: "CoreLocation"
+            locationSource: "CoreLocation",
+            speedKmh: nil,
+            altitude: nil,
+            jitter: nil,
+            packetLossRatio: nil,
+            courseChangeRate: nil
         )
         // Should fall back to .unknown when the string doesn't match
         XCTAssertEqual(record.qualityLevel, .unknown)

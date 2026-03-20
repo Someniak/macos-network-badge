@@ -24,7 +24,7 @@ struct NetworkBadgeApp: App {
     // MARK: - Monitors
 
     /// Watches for network type changes (WiFi, Ethernet, USB, etc.)
-    @StateObject private var networkMonitor = NetworkMonitor()
+    @StateObject private var networkMonitor: NetworkMonitor
 
     /// Measures internet latency every few seconds
     @StateObject private var latencyMonitor: LatencyMonitor
@@ -50,6 +50,9 @@ struct NetworkBadgeApp: App {
     /// Controls the settings window
     @StateObject private var settingsWindowController: SettingsWindowController
 
+    /// Checks GitHub Releases for app updates
+    @StateObject private var updateChecker: UpdateChecker
+
     // MARK: - Initialization
 
     /// Sets up the database, tile cache, location monitor, and map window.
@@ -60,24 +63,31 @@ struct NetworkBadgeApp: App {
         let cache = TileCache()
         let locMonitor = LocationMonitor(database: db)
         let notifManager = NotificationManager()
+        let latMonitor = LatencyMonitor()
+        let netMonitor = NetworkMonitor()
         let mapController = MapWindowController(
             database: db,
             tileCache: cache,
-            locationMonitor: locMonitor
+            locationMonitor: locMonitor,
+            latencyMonitor: latMonitor,
+            networkMonitor: netMonitor
         )
-        let latMonitor = LatencyMonitor()
+        let updateChk = UpdateChecker()
         let settingsController = SettingsWindowController(
             notificationManager: notifManager,
             locationMonitor: locMonitor,
-            latencyMonitor: latMonitor
+            latencyMonitor: latMonitor,
+            updateChecker: updateChk
         )
 
         // Use the shared instances
         self.qualityDatabase = db
         self.tileCache = cache
+        _networkMonitor = StateObject(wrappedValue: netMonitor)
         _latencyMonitor = StateObject(wrappedValue: latMonitor)
         _notificationManager = StateObject(wrappedValue: notifManager)
         _locationMonitor = StateObject(wrappedValue: locMonitor)
+        _updateChecker = StateObject(wrappedValue: updateChk)
         _mapWindowController = StateObject(wrappedValue: mapController)
         _settingsWindowController = StateObject(wrappedValue: settingsController)
     }
@@ -99,7 +109,8 @@ struct NetworkBadgeApp: App {
                 notificationManager: notificationManager,
                 locationMonitor: locationMonitor,
                 mapWindowController: mapWindowController,
-                settingsWindowController: settingsWindowController
+                settingsWindowController: settingsWindowController,
+                updateChecker: updateChecker
             )
         } label: {
             // ── Menu Bar Label ──────────────────────────
@@ -152,6 +163,14 @@ struct NetworkBadgeApp: App {
                 to: newQuality,
                 latencyMs: latencyMonitor.currentLatencyMs ?? 0
             )
+        }
+        // Watch for connection type changes and alert on disconnection
+        .onChange(of: networkMonitor.connectionType) { newType in
+            notificationManager.notifyConnectionChange(to: newType)
+        }
+        // Watch for spatial lookahead predictions and alert on rough connectivity ahead
+        .onChange(of: locationMonitor.intelligence.lookaheadPrediction) { newPrediction in
+            notificationManager.notifyPredictionChange(to: newPrediction)
         }
     }
 }

@@ -215,6 +215,29 @@ final class LatencyMonitor: ObservableObject {
         recalculateAverage()
     }
 
+    // MARK: - ML Features
+
+    /// Standard deviation of latency from the last 10 successful samples.
+    /// More predictive than single latency; cellular has jitter spikes before dropouts.
+    /// Returns nil if fewer than 2 successful samples.
+    var jitter: Double? {
+        let recent = samples.prefix(10).filter { $0.wasSuccessful }
+        guard recent.count >= 2 else { return nil }
+        let mean = recent.reduce(0.0) { $0 + $1.latencyMs } / Double(recent.count)
+        let variance = recent.reduce(0.0) { $0 + ($1.latencyMs - mean) * ($1.latencyMs - mean) } / Double(recent.count)
+        return sqrt(variance)
+    }
+
+    /// Ratio of failed measurements in the last 10 samples (0-1).
+    /// Latency can look fine but packet loss kills usability.
+    /// Returns nil if no samples.
+    var packetLossRatio: Double? {
+        let recent = Array(samples.prefix(10))
+        guard !recent.isEmpty else { return nil }
+        let failed = recent.filter { !$0.wasSuccessful }.count
+        return Double(failed) / Double(recent.count)
+    }
+
     /// Recalculates the average latency from successful samples.
     private func recalculateAverage() {
         let successfulSamples = samples.filter { $0.wasSuccessful }

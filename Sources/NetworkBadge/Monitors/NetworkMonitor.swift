@@ -148,6 +148,17 @@ final class NetworkMonitor: ObservableObject {
         }
     }
 
+    // MARK: - WiFi Info Refresh
+
+    /// Re-reads WiFi SSID and RSSI if currently on WiFi.
+    /// Called when location authorization changes, since CoreWLAN's ssid()
+    /// requires location authorization on macOS 14+ and returns nil without it.
+    func refreshWiFiInfo() {
+        guard connectionType == .wifi else { return }
+        wifiSSID = readCurrentWiFiSSID()
+        wifiRSSI = readCurrentWiFiRSSI()
+    }
+
     // MARK: - WiFi SSID Reading
 
     /// Reads the current WiFi network name (SSID) using CoreWLAN.

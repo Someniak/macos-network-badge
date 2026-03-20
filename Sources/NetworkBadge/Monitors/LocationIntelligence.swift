@@ -58,6 +58,17 @@ final class LocationIntelligence: ObservableObject {
     /// Current bearing in degrees from north (0-360). Updated on each location.
     @Published private(set) var currentBearing: Double = 0
 
+    /// Spatial lookahead prediction: expected quality ahead based on historical data.
+    @Published private(set) var lookaheadPrediction: QualityPrediction? = nil
+
+    /// Current travel speed in km/h.
+    /// Uses direct GPS speed when available, otherwise calculated from position deltas.
+    @Published private(set) var currentSpeedKmh: Double = 0
+
+    /// Whether the current speed is estimated from position deltas + Kalman smoothing
+    /// rather than a direct GPS speed reading.
+    @Published private(set) var isSpeedEstimated: Bool = true
+
     /// Current estimated speed in m/s, computed from recent location buffer.
     /// Thread-safe — acquires the internal queue.
     var estimatedSpeed: Double {
@@ -69,6 +80,8 @@ final class LocationIntelligence: ObservableObject {
         guard recentLocations.count >= 2,
               let first = recentLocations.first,
               let last = recentLocations.last else { return 0 }
+        // If the most recent fix is stale (>10s), we've stopped moving
+        guard -last.time.timeIntervalSinceNow < 10 else { return 0 }
         let elapsed = last.time.timeIntervalSince(first.time)
         guard elapsed > 0 else { return 0 }
         return last.location.distance(from: first.location) / elapsed
@@ -108,11 +121,20 @@ final class LocationIntelligence: ObservableObject {
     /// Rolling buffer of recent locations for speed estimation
     private var recentLocations: [(location: CLLocation, time: Date)] = []
 
+    /// Timer that decays `currentSpeedKmh` toward zero when no new fixes arrive
+    private var speedDecayTimer: Timer?
+
+    // MARK: - Course Change Rate (access on `queue` only)
+
+    /// Rolling buffer of recent bearings for course change rate calculation (last 30s)
+    private var recentBearings: [(date: Date, bearing: Double)] = []
+
     // MARK: - Initialization
 
     init(database: QualityDatabase) {
         self.database = database
         loadSettings()
+        startSpeedDecay()
     }
 
     private func loadSettings() {
@@ -132,6 +154,26 @@ final class LocationIntelligence: ObservableObject {
         if UserDefaults.standard.object(forKey: "liShowTrail") != nil {
             showTrail = UserDefaults.standard.bool(forKey: "liShowTrail")
         }
+    }
+
+    /// Periodically decay `currentSpeedKmh` toward zero when no new fixes arrive.
+    private func startSpeedDecay() {
+        let timer = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let raw = self.estimatedSpeed * 3.6
+            if raw < 1 {
+                // Buffer is stale or barely moving — decay quickly to zero
+                self.currentSpeedKmh = self.currentSpeedKmh * 0.5
+                if self.currentSpeedKmh < 0.5 {
+                    self.currentSpeedKmh = 0
+                    if self.lookaheadPrediction != nil {
+                        self.lookaheadPrediction = nil
+                    }
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        speedDecayTimer = timer
     }
 
     // MARK: - Kalman Filter
@@ -227,6 +269,107 @@ final class LocationIntelligence: ObservableObject {
         var bearing = atan2(y, x) * 180 / .pi
         if bearing < 0 { bearing += 360 }
         currentBearing = bearing
+
+        // Track bearing changes for courseChangeRate
+        let now = Date()
+        queue.sync {
+            recentBearings.append((date: now, bearing: bearing))
+            let cutoff = now.addingTimeInterval(-30)
+            recentBearings.removeAll { $0.date < cutoff }
+        }
+    }
+
+    // MARK: - Course Change Rate
+
+    /// Rate of bearing change in degrees per second over the last 30 seconds.
+    /// High values correlate with winding roads/tracks and frequent tower handoffs.
+    /// Returns nil if fewer than 2 entries or time span < 5s.
+    var courseChangeRate: Double? {
+        queue.sync {
+            guard recentBearings.count >= 2,
+                  let first = recentBearings.first,
+                  let last = recentBearings.last else { return nil }
+            let span = last.date.timeIntervalSince(first.date)
+            guard span >= 5 else { return nil }
+
+            var totalDelta = 0.0
+            for i in 1..<recentBearings.count {
+                var delta = abs(recentBearings[i].bearing - recentBearings[i - 1].bearing)
+                if delta > 180 { delta = 360 - delta }
+                totalDelta += delta
+            }
+            return totalDelta / span
+        }
+    }
+
+    // MARK: - Spatial Lookahead Prediction
+
+    /// Predict network quality ahead based on historical records near the projected position.
+    /// Projects position forward 2 minutes at current speed/bearing and queries nearby records.
+    func refreshPrediction() {
+        let speed = currentSpeedKmh
+        let bearing = currentBearing
+        let location: CLLocation? = queue.sync { lastKnownLocation }
+
+        guard speed >= 5, let loc = location else {
+            DispatchQueue.main.async { self.lookaheadPrediction = nil }
+            return
+        }
+
+        let minutesAhead = 2.0
+        let distanceMeters = (speed / 3.6) * (minutesAhead * 60)
+        let projected = CoordinateUtils.projectCoordinate(
+            from: loc.coordinate, distance: distanceMeters, bearing: bearing
+        )
+
+        // 500m radius → lat/lon bounding box
+        let radiusMeters = 500.0
+        let latDelta = radiusMeters / 111_000.0
+        let lonDelta = radiusMeters / (111_000.0 * cos(projected.latitude * .pi / 180))
+
+        let records = database.queryInRegion(
+            minLat: projected.latitude - latDelta,
+            maxLat: projected.latitude + latDelta,
+            minLon: projected.longitude - lonDelta,
+            maxLon: projected.longitude + lonDelta
+        )
+
+        guard !records.isEmpty else {
+            DispatchQueue.main.async { self.lookaheadPrediction = nil }
+            return
+        }
+
+        // Weighted average: recent records count more (exponential decay by age)
+        let now = Date()
+        var weightedSum = 0.0
+        var totalWeight = 0.0
+
+        for record in records {
+            let ageDays = now.timeIntervalSince(record.timestamp) / 86400.0
+            let weight = exp(-ageDays / 7.0)  // half-life ~5 days
+            let latency = record.wasSuccessful ? record.latencyMs : 1000.0
+            weightedSum += latency * weight
+            totalWeight += weight
+        }
+
+        guard totalWeight > 0 else {
+            DispatchQueue.main.async { self.lookaheadPrediction = nil }
+            return
+        }
+
+        let avgLatency = weightedSum / totalWeight
+        let quality = LatencyQuality.from(latencyMs: avgLatency)
+        let confidence = min(Double(records.count) / 10.0, 1.0)
+
+        let prediction = QualityPrediction(
+            expectedQuality: quality,
+            confidence: confidence,
+            minutesAhead: minutesAhead,
+            sampleCount: records.count,
+            averageLatencyMs: avgLatency
+        )
+
+        DispatchQueue.main.async { self.lookaheadPrediction = prediction }
     }
 
     // MARK: - Anchor Management
@@ -243,6 +386,26 @@ final class LocationIntelligence: ObservableObject {
             if recentLocations.count > 10 { recentLocations.removeFirst() }
             lastKnownLocation = location
             lastKnownTime = time
+        }
+        // Prefer direct GPS speed (>= 0 means valid); fall back to position-delta calculation
+        let rawSpeed: Double
+        if location.speed >= 0 {
+            rawSpeed = location.speed * 3.6
+            isSpeedEstimated = false
+        } else {
+            rawSpeed = estimatedSpeed * 3.6
+            isSpeedEstimated = true
+        }
+        if currentSpeedKmh == 0 {
+            currentSpeedKmh = rawSpeed
+        } else {
+            // Exponential moving average — 0.3 weighting on new sample smooths out GPS jitter
+            currentSpeedKmh = currentSpeedKmh * 0.7 + rawSpeed * 0.3
+        }
+
+        // Refresh spatial lookahead prediction on background queue
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            self?.refreshPrediction()
         }
     }
 
@@ -272,13 +435,13 @@ final class LocationIntelligence: ObservableObject {
             let endTime = newLocation.timestamp
             let totalDuration = endTime.timeIntervalSince(anchorTime)
 
-            guard totalDuration > 0, totalDuration <= maxInterpolationGap else {
-                // Gap too large — discard pending (unreliable interpolation)
+            guard totalDuration > 0 else {
                 pendingRecords.removeAll()
                 return
             }
 
             let totalDistance = newLocation.distance(from: anchorLocation)
+            let isLongGap = totalDuration > maxInterpolationGap
 
             for record in pendingRecords {
                 let t = max(0, min(1, record.timestamp.timeIntervalSince(anchorTime) / totalDuration))
@@ -288,10 +451,11 @@ final class LocationIntelligence: ObservableObject {
                 let lon = anchorLocation.coordinate.longitude +
                     t * (newLocation.coordinate.longitude - anchorLocation.coordinate.longitude)
 
+                // Long gaps get inflated accuracy to reflect greater uncertainty
                 let estimatedAccuracy = max(
                     anchorLocation.horizontalAccuracy,
                     newLocation.horizontalAccuracy,
-                    totalDistance * 0.1
+                    totalDistance * (isLongGap ? 0.5 : 0.1)
                 )
 
                 database.update(
@@ -329,6 +493,82 @@ final class LocationIntelligence: ObservableObject {
     /// Number of records currently awaiting backpropagation.
     var pendingCount: Int { queue.sync { pendingRecords.count } }
 
+    /// Repair orphaned (0,0) records already in the database by interpolating
+    /// between their nearest valid neighbors. Returns the number of records repaired.
+    @discardableResult
+    func repairOrphanedRecords() -> Int {
+        let orphans = database.queryOrphaned()
+        guard !orphans.isEmpty else { return 0 }
+
+        // Get all valid records as anchors, sorted by timestamp
+        let allRecords = database.queryAll()
+        let anchors = allRecords
+            .filter { $0.latitude != 0 || $0.longitude != 0 }
+            .sorted { $0.timestamp < $1.timestamp }
+
+        guard !anchors.isEmpty else { return 0 }
+
+        var repaired = 0
+
+        for orphan in orphans {
+            let ts = orphan.timestamp
+
+            // Find nearest anchor before and after
+            let before = anchors.last { $0.timestamp <= ts }
+            let after = anchors.first { $0.timestamp > ts }
+
+            let lat: Double
+            let lon: Double
+            let accuracy: Double
+
+            if let before = before, let after = after {
+                // Interpolate between the two anchors
+                let totalDuration = after.timestamp.timeIntervalSince(before.timestamp)
+                guard totalDuration > 0 else {
+                    // Same timestamp — use the before anchor
+                    lat = before.latitude
+                    lon = before.longitude
+                    accuracy = before.locationAccuracy
+                    database.update(
+                        id: orphan.id,
+                        latitude: lat, longitude: lon,
+                        locationAccuracy: accuracy,
+                        locationSource: LocationSource.interpolated.rawValue
+                    )
+                    repaired += 1
+                    continue
+                }
+
+                let t = max(0, min(1, ts.timeIntervalSince(before.timestamp) / totalDuration))
+                lat = before.latitude + t * (after.latitude - before.latitude)
+                lon = before.longitude + t * (after.longitude - before.longitude)
+
+                // Estimate distance between anchors for accuracy scaling
+                let beforeLoc = CLLocation(latitude: before.latitude, longitude: before.longitude)
+                let afterLoc = CLLocation(latitude: after.latitude, longitude: after.longitude)
+                let dist = beforeLoc.distance(from: afterLoc)
+                accuracy = max(before.locationAccuracy, after.locationAccuracy, dist * 0.5)
+            } else if let nearest = before ?? after {
+                // Only one side — snap to nearest anchor
+                lat = nearest.latitude
+                lon = nearest.longitude
+                accuracy = nearest.locationAccuracy
+            } else {
+                continue
+            }
+
+            database.update(
+                id: orphan.id,
+                latitude: lat, longitude: lon,
+                locationAccuracy: accuracy,
+                locationSource: LocationSource.interpolated.rawValue
+            )
+            repaired += 1
+        }
+
+        return repaired
+    }
+
     // MARK: - Road/Rail Snapping
 
     /// Snap interpolated points to actual roads using MKDirections.
@@ -341,15 +581,21 @@ final class LocationIntelligence: ObservableObject {
         let request = MKDirections.Request()
         request.source = MKMapItem(placemark: MKPlacemark(coordinate: start))
         request.destination = MKMapItem(placemark: MKPlacemark(coordinate: end))
+
+        // Try transit first (snaps to train tracks); fall back to automobile
+        request.transportType = .transit
+        if let coords = await routeCoords(for: request) { return coords }
+
         request.transportType = .automobile
+        return await routeCoords(for: request)
+    }
 
-        let directions = MKDirections(request: request)
-        guard let response = try? await directions.calculate(),
+    private func routeCoords(for request: MKDirections.Request) async -> [CLLocationCoordinate2D]? {
+        guard let response = try? await MKDirections(request: request).calculate(),
               let route = response.routes.first else { return nil }
-
-        let pointCount = route.polyline.pointCount
-        var coords = [CLLocationCoordinate2D](repeating: CLLocationCoordinate2D(), count: pointCount)
-        route.polyline.getCoordinates(&coords, range: NSRange(location: 0, length: pointCount))
+        let n = route.polyline.pointCount
+        var coords = [CLLocationCoordinate2D](repeating: CLLocationCoordinate2D(), count: n)
+        route.polyline.getCoordinates(&coords, range: NSRange(location: 0, length: n))
         return coords
     }
 

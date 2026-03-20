@@ -52,6 +52,21 @@ struct QualityRecord: Identifiable, Equatable, Sendable {
     /// How the GPS coordinates were determined (CoreLocation, IP, Interpolated, etc.)
     let locationSource: String
 
+    /// Travel speed in km/h at time of measurement (nil if stationary or unknown)
+    let speedKmh: Double?
+
+    /// Altitude in meters from GPS (nil if unavailable). Tunnels/valleys kill signal.
+    let altitude: Double?
+
+    /// Latency jitter (stddev of recent samples) in ms. Spikes predict dropouts.
+    let jitter: Double?
+
+    /// Ratio of failed pings in recent samples (0-1). High loss kills usability.
+    let packetLossRatio: Double?
+
+    /// Rate of bearing change in degrees/second. Winding paths cause tower handoffs.
+    let courseChangeRate: Double?
+
     /// Derived quality color for map display
     var qualityLevel: LatencyQuality {
         LatencyQuality(rawValue: quality) ?? .unknown
@@ -73,7 +88,12 @@ struct QualityRecord: Identifiable, Equatable, Sendable {
         wifiSSID: String?,
         wifiRSSI: Int?,
         interfaceName: String,
-        locationSource: LocationSource = .coreLocation
+        locationSource: LocationSource = .coreLocation,
+        speedKmh: Double? = nil,
+        altitude: Double? = nil,
+        jitter: Double? = nil,
+        packetLossRatio: Double? = nil,
+        courseChangeRate: Double? = nil
     ) -> QualityRecord {
         let quality: LatencyQuality = wasSuccessful
             ? LatencyQuality.from(latencyMs: latencyMs)
@@ -92,7 +112,12 @@ struct QualityRecord: Identifiable, Equatable, Sendable {
             wifiSSID: wifiSSID,
             wifiRSSI: wifiRSSI,
             interfaceName: interfaceName,
-            locationSource: locationSource.rawValue
+            locationSource: locationSource.rawValue,
+            speedKmh: speedKmh,
+            altitude: altitude,
+            jitter: jitter,
+            packetLossRatio: packetLossRatio,
+            courseChangeRate: courseChangeRate
         )
     }
 }

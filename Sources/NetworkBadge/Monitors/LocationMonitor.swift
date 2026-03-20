@@ -19,7 +19,7 @@ import Foundation
 ///   let monitor = LocationMonitor(database: db)
 ///   monitor.start(networkMonitor: network, latencyMonitor: latency)
 ///
-final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelegate {
+final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelegate, @unchecked Sendable {
 
     // MARK: - Published Properties
 
@@ -35,11 +35,13 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
             UserDefaults.standard.set(isTrackingEnabled, forKey: "gpsTrackingEnabled")
             guard !isInitializing else { return }
             if isTrackingEnabled {
+                if gps2ip.isEnabled { gps2ip.start() }
                 locationManager.requestWhenInUseAuthorization()
                 updateAuthorizationStatus()
             } else {
                 locationManager.stopUpdatingLocation()
                 cancelStationaryTimer()
+                gps2ip.stop()
                 isTracking = false
             }
         }
@@ -71,7 +73,7 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     private let locationManager = CLLocationManager()
 
     /// Minimum distance in meters before recording a new measurement
-    @Published var minimumDistance: CLLocationDistance = 50.0 {
+    @Published var minimumDistance: CLLocationDistance = 20.0 {
         didSet {
             UserDefaults.standard.set(minimumDistance, forKey: "gpsMinimumDistance")
             locationManager.distanceFilter = minimumDistance
@@ -82,7 +84,7 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     private var lastRecordedLocation: CLLocation?
 
     /// Minimum time between recordings (prevents spam when jittering at one spot)
-    @Published var minimumInterval: TimeInterval = 10.0 {
+    @Published var minimumInterval: TimeInterval = 3.0 {
         didSet {
             UserDefaults.standard.set(minimumInterval, forKey: "gpsMinimumInterval")
         }
@@ -101,11 +103,21 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     private var stationaryTimer: Timer?
     private var currentStationaryInterval: TimeInterval = 10
 
+    /// Dead reckoning: last real GPS fix and when it arrived
+    private var lastRealGPSLocation: CLLocation?
+    private var lastRealGPSTime: Date?
+    private var deadReckoningTimer: Timer?
+
     /// Maximum stationary poll interval (5 minutes) to prevent unbounded growth
     private let maxStationaryInterval: TimeInterval = 300
 
     /// Guards against didSet side-effects during init
     private var isInitializing = true
+
+    /// GPS2IP iPhone GPS source
+    var gps2ip = GPS2IPSource()
+
+    private var cancellables = Set<AnyCancellable>()
 
     // MARK: - Initialization
 
@@ -120,10 +132,12 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
         if UserDefaults.standard.object(forKey: "gpsTrackingEnabled") != nil {
             isTrackingEnabled = UserDefaults.standard.bool(forKey: "gpsTrackingEnabled")
         }
+        // Migrate to lower defaults (v2). If the saved value exactly matches the old
+        // default it was never customised — reset to the new lower value.
         let savedDistance = UserDefaults.standard.double(forKey: "gpsMinimumDistance")
-        if savedDistance > 0 { minimumDistance = savedDistance }
+        if savedDistance > 0 && savedDistance != 50.0 { minimumDistance = savedDistance }
         let savedInterval = UserDefaults.standard.double(forKey: "gpsMinimumInterval")
-        if savedInterval > 0 { minimumInterval = savedInterval }
+        if savedInterval > 0 && savedInterval != 10.0 { minimumInterval = savedInterval }
         let savedMultiplier = UserDefaults.standard.double(forKey: "gpsStationaryMultiplier")
         if savedMultiplier > 0 { stationaryMultiplier = savedMultiplier }
         locationManager.distanceFilter = minimumDistance
@@ -137,7 +151,32 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
         self.networkMonitor = networkMonitor
         self.latencyMonitor = latencyMonitor
 
+        gps2ip.onLocation = { [weak self] location in
+            DispatchQueue.main.async {
+                guard let self, self.isTracking else { return }
+                self.latitude = location.coordinate.latitude
+                self.longitude = location.coordinate.longitude
+                self.currentLocation = location
+                self.lastRealGPSLocation = location
+                self.lastRealGPSTime = Date()
+                // GPS2IP is real iPhone GPS — skip Kalman/outlier/accuracy pipeline
+                self.recordGPS2IP(at: location)
+            }
+        }
+
+        gps2ip.$isEnabled
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] enabled in
+                guard let self else { return }
+                if enabled && self.isTracking { self.gps2ip.start() }
+                else { self.gps2ip.stop() }
+            }
+            .store(in: &cancellables)
+
         guard isTrackingEnabled else { return }
+
+        if gps2ip.isEnabled { gps2ip.start() }
 
         // Request authorization (shows system prompt on first launch)
         locationManager.requestWhenInUseAuthorization()
@@ -149,9 +188,13 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     func stop() {
         locationManager.stopUpdatingLocation()
         cancelStationaryTimer()
+        stopDeadReckoning()
+        gps2ip.stop()
         intelligence.flushOnStop()
         intelligence.resetKalman()
         currentLocation = nil
+        lastRealGPSLocation = nil
+        lastRealGPSTime = nil
         latitude = nil
         longitude = nil
         isTracking = false
@@ -166,13 +209,18 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
 
-        // Dispatch all state mutations to the main thread so they don't
-        // race with performStationaryRecord (which runs on a main-thread timer).
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isTracking else { return }
+            // When GPS2IP is actively providing fixes, it gives far better
+            // results than CoreLocation's Wi-Fi positioning. Skip CL updates
+            // to avoid spider-web patterns from dual-source recording.
+            // Falls back to CoreLocation if GPS2IP goes stale (>15s without fix).
+            guard !self.gps2ip.isActivelyFixing else { return }
             self.latitude = location.coordinate.latitude
             self.longitude = location.coordinate.longitude
             self.currentLocation = location
+            self.lastRealGPSLocation = location
+            self.lastRealGPSTime = Date()
             self.recordIfNeeded(at: location)
         }
     }
@@ -198,11 +246,16 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
             switch status {
             case .authorizedAlways, .authorized, .authorizedWhenInUse:
                 self.isAuthorized = true
+                // CoreWLAN's ssid() requires location authorization on macOS 14+.
+                // NWPathMonitor often fires before authorization is granted, so
+                // the initial SSID read returns nil. Re-read now that we're authorized.
+                self.networkMonitor?.refreshWiFiInfo()
                 if !self.isTracking && self.isTrackingEnabled {
                     self.locationManager.startUpdatingLocation()
                     self.isTracking = true
                     self.currentStationaryInterval = self.minimumInterval
                     self.scheduleStationaryPoll()
+                    self.startDeadReckoning()
                 }
             case .notDetermined:
                 self.isAuthorized = false
@@ -267,6 +320,8 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
 
         let latestSample = latency.samples.first
 
+        let speed = intelligence.currentSpeedKmh
+        let ml = mlFields(location: validLocation)
         let record = QualityRecord.from(
             latitude: validLocation.coordinate.latitude,
             longitude: validLocation.coordinate.longitude,
@@ -277,7 +332,12 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
             wifiSSID: network.wifiSSID,
             wifiRSSI: network.wifiRSSI,
             interfaceName: network.interfaceName,
-            locationSource: source
+            locationSource: source,
+            speedKmh: speed > 1 ? speed : nil,
+            altitude: ml.altitude,
+            jitter: ml.jitter,
+            packetLossRatio: ml.packetLossRatio,
+            courseChangeRate: ml.courseChangeRate
         )
 
         // Write to database
@@ -299,6 +359,50 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
         }
     }
 
+    /// Records a GPS2IP location directly, skipping the Kalman / outlier / accuracy
+    /// pipeline. iPhone GPS is already smooth and accurate; running it through the
+    /// Wi-Fi-noise-oriented intelligence layer only drops good fixes.
+    private func recordGPS2IP(at location: CLLocation) {
+        // Distance gate
+        if let last = lastRecordedLocation, location.distance(from: last) < minimumDistance { return }
+        // Time gate
+        if let last = lastRecordedTime, Date().timeIntervalSince(last) < minimumInterval { return }
+
+        guard let network = networkMonitor, let latency = latencyMonitor else { return }
+        guard latency.samples.count > 0 else { return }
+
+        let latestSample = latency.samples.first
+        let speed = intelligence.currentSpeedKmh
+        let ml = mlFields(location: location)
+        let record = QualityRecord.from(
+            latitude: location.coordinate.latitude,
+            longitude: location.coordinate.longitude,
+            locationAccuracy: location.horizontalAccuracy,
+            latencyMs: latestSample?.latencyMs ?? 0,
+            wasSuccessful: latestSample?.wasSuccessful ?? false,
+            connectionType: network.connectionType,
+            wifiSSID: network.wifiSSID,
+            wifiRSSI: network.wifiRSSI,
+            interfaceName: network.interfaceName,
+            locationSource: .gps2ip,
+            speedKmh: speed > 1 ? speed : nil,
+            altitude: ml.altitude,
+            jitter: ml.jitter,
+            packetLossRatio: ml.packetLossRatio,
+            courseChangeRate: ml.courseChangeRate
+        )
+        database.insert(record)
+        intelligence.recordAnchor(location)
+        intelligence.backpropagate(newLocation: location)
+
+        lastRecordedLocation = location
+        lastRecordedTime = Date()
+
+        sessionRecordCount += 1
+        currentStationaryInterval = minimumInterval
+        scheduleStationaryPoll()
+    }
+
     /// Buffer a latency-only record with no location (for later backpropagation).
     private func bufferLatencyOnlyRecord() {
         guard let network = networkMonitor, let latency = latencyMonitor else { return }
@@ -312,6 +416,7 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
 
         let latestSample = latency.samples.first
 
+        let ml = mlFields(location: nil)
         let record = QualityRecord.from(
             latitude: 0,
             longitude: 0,
@@ -322,7 +427,11 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
             wifiSSID: network.wifiSSID,
             wifiRSSI: network.wifiRSSI,
             interfaceName: network.interfaceName,
-            locationSource: .none
+            locationSource: .none,
+            altitude: nil,
+            jitter: ml.jitter,
+            packetLossRatio: ml.packetLossRatio,
+            courseChangeRate: ml.courseChangeRate
         )
 
         database.insert(record)
@@ -342,6 +451,7 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
 
         let latestSample = latency.samples.first
 
+        let ml = mlFields(location: nil)
         let record = QualityRecord.from(
             latitude: coords.latitude,
             longitude: coords.longitude,
@@ -352,7 +462,11 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
             wifiSSID: network.wifiSSID,
             wifiRSSI: network.wifiRSSI,
             interfaceName: network.interfaceName,
-            locationSource: .ipGeolocation
+            locationSource: .ipGeolocation,
+            altitude: nil,
+            jitter: ml.jitter,
+            packetLossRatio: ml.packetLossRatio,
+            courseChangeRate: ml.courseChangeRate
         )
 
         database.insert(record)
@@ -360,6 +474,54 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
         DispatchQueue.main.async { [weak self] in
             self?.sessionRecordCount += 1
         }
+    }
+
+    // MARK: - ML Feature Helpers
+
+    /// Collects ML feature fields from current monitor state and a location.
+    private func mlFields(location: CLLocation?) -> (altitude: Double?, jitter: Double?, packetLossRatio: Double?, courseChangeRate: Double?) {
+        let altitude = location.flatMap { $0.verticalAccuracy >= 0 ? $0.altitude : nil }
+        return (
+            altitude: altitude,
+            jitter: latencyMonitor?.jitter,
+            packetLossRatio: latencyMonitor?.packetLossRatio,
+            courseChangeRate: intelligence.courseChangeRate
+        )
+    }
+
+    // MARK: - Dead Reckoning
+
+    private func startDeadReckoning() {
+        deadReckoningTimer?.invalidate()
+        let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.tickDeadReckoning()
+        }
+        RunLoop.main.add(t, forMode: .common)
+        deadReckoningTimer = t
+    }
+
+    private func stopDeadReckoning() {
+        deadReckoningTimer?.invalidate()
+        deadReckoningTimer = nil
+    }
+
+    /// Project position forward between GPS fixes using bearing + estimated speed.
+    private func tickDeadReckoning() {
+        guard isTracking,
+              let base = lastRealGPSLocation,
+              let baseTime = lastRealGPSTime else { return }
+
+        let elapsed = Date().timeIntervalSince(baseTime)
+        let speedMs = intelligence.estimatedSpeed
+
+        // Only dead reckon when GPS is stale (>3 s) and we're actually moving
+        guard elapsed > 3, speedMs > 0.5 else { return }
+
+        let bearing = intelligence.currentBearing
+        let distance = speedMs * elapsed
+        let projected = CoordinateUtils.projectCoordinate(from: base.coordinate, distance: distance, bearing: bearing)
+        latitude = projected.latitude
+        longitude = projected.longitude
     }
 
     private func scheduleStationaryPoll() {
@@ -382,6 +544,14 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     private func performStationaryRecord() {
         guard isTracking, let rawLocation = currentLocation else { return }
 
+        // When GPS2IP is actively providing fixes, don't create CoreLocation-sourced
+        // records — GPS2IP's own recordGPS2IP() handles recording with better accuracy.
+        // Falls back to CoreLocation if GPS2IP goes stale (>15s without fix).
+        guard !gps2ip.isActivelyFixing else {
+            scheduleStationaryPoll()
+            return
+        }
+
         let location = intelligence.kalmanSmooth(rawLocation)
         let (accept, source) = intelligence.shouldRecord(location: location)
 
@@ -403,6 +573,8 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
         guard latency.samples.count > 0 else { return }
 
         let latestSample = latency.samples.first
+        let speed = intelligence.currentSpeedKmh
+        let ml = mlFields(location: location)
         let record = QualityRecord.from(
             latitude: location.coordinate.latitude,
             longitude: location.coordinate.longitude,
@@ -413,7 +585,12 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
             wifiSSID: network.wifiSSID,
             wifiRSSI: network.wifiRSSI,
             interfaceName: network.interfaceName,
-            locationSource: source
+            locationSource: source,
+            speedKmh: speed > 1 ? speed : nil,
+            altitude: ml.altitude,
+            jitter: ml.jitter,
+            packetLossRatio: ml.packetLossRatio,
+            courseChangeRate: ml.courseChangeRate
         )
         database.insert(record)
         intelligence.recordAnchor(location)

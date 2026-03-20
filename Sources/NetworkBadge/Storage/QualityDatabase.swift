@@ -118,6 +118,15 @@ final class QualityDatabase {
         // Add location_source column if it doesn't exist.
         // ALTER TABLE will error if column already exists — execute() logs and ignores.
         execute("ALTER TABLE quality_records ADD COLUMN location_source TEXT NOT NULL DEFAULT 'CoreLocation'")
+
+        // Add speed_kmh column if it doesn't exist.
+        execute("ALTER TABLE quality_records ADD COLUMN speed_kmh REAL")
+
+        // ML feature columns
+        execute("ALTER TABLE quality_records ADD COLUMN altitude REAL")
+        execute("ALTER TABLE quality_records ADD COLUMN jitter REAL")
+        execute("ALTER TABLE quality_records ADD COLUMN packet_loss_ratio REAL")
+        execute("ALTER TABLE quality_records ADD COLUMN course_change_rate REAL")
     }
 
     // MARK: - Insert
@@ -128,8 +137,9 @@ final class QualityDatabase {
             INSERT INTO quality_records (
                 id, timestamp, latitude, longitude, location_accuracy,
                 latency_ms, was_successful, quality, connection_type,
-                wifi_ssid, wifi_rssi, interface_name, location_source
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                wifi_ssid, wifi_rssi, interface_name, location_source,
+                speed_kmh, altitude, jitter, packet_loss_ratio, course_change_rate
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
 
         var stmt: OpaquePointer?
@@ -163,6 +173,36 @@ final class QualityDatabase {
 
         sqlite3_bind_text(stmt, 12, record.interfaceName, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
         sqlite3_bind_text(stmt, 13, record.locationSource, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+
+        if let speed = record.speedKmh {
+            sqlite3_bind_double(stmt, 14, speed)
+        } else {
+            sqlite3_bind_null(stmt, 14)
+        }
+
+        if let altitude = record.altitude {
+            sqlite3_bind_double(stmt, 15, altitude)
+        } else {
+            sqlite3_bind_null(stmt, 15)
+        }
+
+        if let jitter = record.jitter {
+            sqlite3_bind_double(stmt, 16, jitter)
+        } else {
+            sqlite3_bind_null(stmt, 16)
+        }
+
+        if let packetLossRatio = record.packetLossRatio {
+            sqlite3_bind_double(stmt, 17, packetLossRatio)
+        } else {
+            sqlite3_bind_null(stmt, 17)
+        }
+
+        if let courseChangeRate = record.courseChangeRate {
+            sqlite3_bind_double(stmt, 18, courseChangeRate)
+        } else {
+            sqlite3_bind_null(stmt, 18)
+        }
 
         if sqlite3_step(stmt) != SQLITE_DONE {
             print("[QualityDatabase] Failed to insert record: \(errorMessage)")
@@ -250,6 +290,15 @@ final class QualityDatabase {
         return readRows(from: stmt)
     }
 
+    /// Returns records at (0,0) — orphaned during GPS dropout, ordered by timestamp ascending.
+    func queryOrphaned() -> [QualityRecord] {
+        return query(sql: """
+            SELECT * FROM quality_records
+            WHERE latitude = 0.0 AND longitude = 0.0
+            ORDER BY timestamp ASC
+            """)
+    }
+
     /// Returns the total number of records in the database.
     func recordCount() -> Int {
         let sql = "SELECT COUNT(*) FROM quality_records"
@@ -305,6 +354,26 @@ final class QualityDatabase {
                 ? String(cString: sqlite3_column_text(stmt, 12))
                 : "CoreLocation"
 
+            let speedKmh: Double? = sqlite3_column_type(stmt, 13) != SQLITE_NULL
+                ? sqlite3_column_double(stmt, 13)
+                : nil
+
+            let altitude: Double? = sqlite3_column_type(stmt, 14) != SQLITE_NULL
+                ? sqlite3_column_double(stmt, 14)
+                : nil
+
+            let jitter: Double? = sqlite3_column_type(stmt, 15) != SQLITE_NULL
+                ? sqlite3_column_double(stmt, 15)
+                : nil
+
+            let packetLossRatio: Double? = sqlite3_column_type(stmt, 16) != SQLITE_NULL
+                ? sqlite3_column_double(stmt, 16)
+                : nil
+
+            let courseChangeRate: Double? = sqlite3_column_type(stmt, 17) != SQLITE_NULL
+                ? sqlite3_column_double(stmt, 17)
+                : nil
+
             let record = QualityRecord(
                 id: UUID(uuidString: idStr) ?? UUID(),
                 timestamp: Date(timeIntervalSince1970: timestamp),
@@ -318,7 +387,12 @@ final class QualityDatabase {
                 wifiSSID: wifiSSID,
                 wifiRSSI: wifiRSSI,
                 interfaceName: interfaceName,
-                locationSource: locationSource
+                locationSource: locationSource,
+                speedKmh: speedKmh,
+                altitude: altitude,
+                jitter: jitter,
+                packetLossRatio: packetLossRatio,
+                courseChangeRate: courseChangeRate
             )
 
             records.append(record)

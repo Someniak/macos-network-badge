@@ -32,6 +32,11 @@ final class MapWindowController: ObservableObject {
     private let database: QualityDatabase
     private let tileCache: TileCache
     private weak var locationMonitor: LocationMonitor?
+    private weak var latencyMonitor: LatencyMonitor?
+    private weak var networkMonitor: NetworkMonitor?
+
+    /// Controller for the data browser window (created lazily, shared with map view)
+    private lazy var dataBrowserController = DataBrowserWindowController(database: database)
 
     // MARK: - Private Properties
 
@@ -49,10 +54,15 @@ final class MapWindowController: ObservableObject {
     ///   - database: The quality database to read records from
     ///   - tileCache: The tile cache for offline map display
     ///   - locationMonitor: The location monitor for current position
-    init(database: QualityDatabase, tileCache: TileCache, locationMonitor: LocationMonitor) {
+    ///   - latencyMonitor: The latency monitor for ping status
+    ///   - networkMonitor: The network monitor for connection info
+    init(database: QualityDatabase, tileCache: TileCache, locationMonitor: LocationMonitor,
+         latencyMonitor: LatencyMonitor, networkMonitor: NetworkMonitor) {
         self.database = database
         self.tileCache = tileCache
         self.locationMonitor = locationMonitor
+        self.latencyMonitor = latencyMonitor
+        self.networkMonitor = networkMonitor
     }
 
     deinit {
@@ -74,11 +84,16 @@ final class MapWindowController: ObservableObject {
         }
 
         // Create the SwiftUI map view
-        guard let monitor = locationMonitor else { return }
+        guard let monitor = locationMonitor,
+              let latMonitor = latencyMonitor,
+              let netMonitor = networkMonitor else { return }
         let mapView = QualityMapView(
             database: database,
             tileCache: tileCache,
-            locationMonitor: monitor
+            locationMonitor: monitor,
+            latencyMonitor: latMonitor,
+            networkMonitor: netMonitor,
+            dataBrowserController: dataBrowserController
         )
 
         // Wrap in an NSHostingController for AppKit integration
