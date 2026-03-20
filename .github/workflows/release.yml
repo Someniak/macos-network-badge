@@ -70,6 +70,13 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Resources/Info.plist
           /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" Resources/Info.plist
 
+      - name: Commit version stamp
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Resources/Info.plist
+          git commit -m "Stamp version ${{ steps.version.outputs.version }} (build ${{ github.run_number }})"
+
       - name: Cache Swift build
         uses: actions/cache@v4
         with:

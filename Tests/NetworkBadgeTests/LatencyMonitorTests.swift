@@ -182,17 +182,63 @@ final class LatencyMonitorTests: XCTestCase {
         XCTAssertFalse(monitor.isMeasuring)
     }
 
+    // MARK: - Jitter & Packet Loss
+
+    /// Jitter should be nil with fewer than 2 successful samples
+    func testJitterNilWithFewSamples() {
+        let monitor = LatencyMonitor()
+        XCTAssertNil(monitor.jitter)
+
+        monitor.recordSample(LatencySample(timestamp: Date(), latencyMs: 42.0, wasSuccessful: true))
+        XCTAssertNil(monitor.jitter)
+    }
+
+    /// Jitter should be the stddev of recent successful latencies
+    func testJitterCalculation() {
+        let monitor = LatencyMonitor()
+
+        // Add samples: 40, 50, 60 → stddev = sqrt(((−10)²+0²+10²)/3) ≈ 8.16
+        for latency in [40.0, 50.0, 60.0] {
+            monitor.recordSample(LatencySample(timestamp: Date(), latencyMs: latency, wasSuccessful: true))
+        }
+
+        let jitter = monitor.jitter
+        XCTAssertNotNil(jitter)
+        XCTAssertGreaterThan(jitter!, 7.0)
+        XCTAssertLessThan(jitter!, 10.0)
+    }
+
+    /// Packet loss should be nil with no samples
+    func testPacketLossNilWithNoSamples() {
+        let monitor = LatencyMonitor()
+        XCTAssertNil(monitor.packetLossRatio)
+    }
+
+    /// Packet loss should reflect failed/total ratio
+    func testPacketLossRatio() {
+        let monitor = LatencyMonitor()
+
+        // 3 success, 2 failed → 2/5 = 0.4
+        for latency in [40.0, 50.0, 60.0] {
+            monitor.recordSample(LatencySample(timestamp: Date(), latencyMs: latency, wasSuccessful: true))
+        }
+        monitor.recordSample(LatencySample(timestamp: Date(), latencyMs: 0, wasSuccessful: false))
+        monitor.recordSample(LatencySample(timestamp: Date(), latencyMs: 0, wasSuccessful: false))
+
+        let loss = monitor.packetLossRatio
+        XCTAssertNotNil(loss)
+        XCTAssertEqual(loss!, 0.4, accuracy: 0.01)
+    }
+
     // MARK: - Configuration
 
     /// Verify custom configuration is respected
     func testCustomConfiguration() {
         let monitor = LatencyMonitor(
-            interval: 5.0,
             timeout: 15.0,
             maxSamples: 50
         )
 
-        XCTAssertEqual(monitor.measurementInterval, 5.0)
         XCTAssertEqual(monitor.timeoutInterval, 15.0)
         XCTAssertEqual(monitor.maxSampleCount, 50)
     }

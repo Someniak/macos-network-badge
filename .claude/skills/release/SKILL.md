@@ -3,7 +3,6 @@ name: release
 description: Create a new release of Network Badge
 disable-model-invocation: true
 allowed-tools: Bash(git *), Bash(swift *), Bash(gh *)
-argument-hint: [version]
 ---
 
 Create a new release of Network Badge with version `$ARGUMENTS`.
@@ -34,13 +33,47 @@ git checkout main
 git pull origin main
 ```
 
-### 4. Create release branch
+### 4. Update CHANGELOG.md
+
+Add a new section at the top of `CHANGELOG.md` (below the header, above the previous version):
+
+```markdown
+## [$ARGUMENTS] — YYYY-MM-DD
+
+### Added
+- **Feature name** — short description
+
+### Changed
+- **What changed** — short description
+
+### Fixed
+- Description of what was fixed
+```
+
+Guidelines:
+- Use today's date in `YYYY-MM-DD` format
+- Categorize entries under **Added**, **Changed**, **Fixed**, **Removed**, or **Security** as appropriate
+- Lead each item with a **bold label**, then a dash and description
+- Focus on user-facing behavior, not internal implementation
+- Group related commits into single entries — don't list every commit
+- Review `git log` from the previous tag to HEAD to identify all changes:
+  ```bash
+  git log $(git tag --list 'v*' --sort=-v:refname | head -1)..HEAD --oneline
+  ```
+
+Commit the changelog update:
+```bash
+git add CHANGELOG.md
+git commit -m "Add changelog for v$ARGUMENTS"
+```
+
+### 5. Create release branch
 
 ```bash
 git checkout -b release/v$ARGUMENTS
 ```
 
-### 5. Run tests
+### 6. Run tests
 
 ```bash
 swift test
@@ -48,7 +81,7 @@ swift test
 
 If tests fail, stop and report the failures. Do not push a broken release.
 
-### 6. Push the release branch
+### 7. Push the release branch
 
 ```bash
 git push -u origin release/v$ARGUMENTS
@@ -62,7 +95,7 @@ This triggers the GitHub Actions release pipeline which will automatically:
 5. Create a GitHub Release with the DMG attached
 6. Open a merge-back PR to `main`
 
-### 7. Report success
+### 8. Report success
 
 Tell the user:
 - The release branch has been pushed

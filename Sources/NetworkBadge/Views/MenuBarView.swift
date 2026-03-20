@@ -8,11 +8,11 @@
 //   - Current latency (big and prominent)
 //   - Average latency and quality indicator
 //   - Sparkline chart of recent measurements
+//   - GPS tracking status and "Show Map" button
 //   - Settings (Launch at Login, Alert on Poor Connection)
 //   - Quit button
 // ---------------------------------------------------------
 
-import ServiceManagement
 import SwiftUI
 
 /// The main popover view shown when the user clicks the menu bar item.
@@ -26,6 +26,18 @@ struct MenuBarView: View {
 
     /// The notification manager — controls quality drop alerts
     @ObservedObject var notificationManager: NotificationManager
+
+    /// The location monitor — tracks GPS for quality mapping
+    @ObservedObject var locationMonitor: LocationMonitor
+
+    /// Controls the separate map window
+    @ObservedObject var mapWindowController: MapWindowController
+
+    /// Controls the settings window
+    @ObservedObject var settingsWindowController: SettingsWindowController
+
+    /// Checks GitHub Releases for app updates
+    @ObservedObject var updateChecker: UpdateChecker
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -43,13 +55,8 @@ struct MenuBarView: View {
 
             Divider()
 
-            // ── Settings ──────────────────────────────
-            settingsSection
-
-            Divider()
-
-            // ── Footer ─────────────────────────────────
-            footerSection
+            // ── GPS status + actions ─────────────────────
+            bottomRow
         }
         .padding(14)
         .frame(width: 280)
@@ -120,52 +127,107 @@ struct MenuBarView: View {
         }
     }
 
-    // MARK: - Settings
+    // MARK: - Bottom row (GPS status + actions)
 
-    /// Checkboxes side by side
-    private var settingsSection: some View {
-        HStack {
-            Toggle("Launch at Login", isOn: Binding(
-                get: { SMAppService.mainApp.status == .enabled },
-                set: { newValue in
-                    do {
-                        if newValue {
-                            try SMAppService.mainApp.register()
-                        } else {
-                            try SMAppService.mainApp.unregister()
-                        }
-                    } catch {
-                        print("Failed to update login item: \(error)")
+    /// GPS status on the left; Show Map, Settings, Quit on the right — all on one line.
+    private var bottomRow: some View {
+        HStack(spacing: 6) {
+            if locationMonitor.isTrackingEnabled {
+                // GPS status indicator
+                if locationMonitor.isTracking {
+                    Image(systemName: "location.fill")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                    Text("Tracking")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    if locationMonitor.sessionRecordCount > 0 {
+                        Text("(\(locationMonitor.sessionRecordCount) pts)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
+                } else if !locationMonitor.isAuthorized {
+                    Image(systemName: "location.slash")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                    Text("Location off")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } else {
+                    Image(systemName: "location")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text("Waiting for GPS")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
-            ))
-            .toggleStyle(.checkbox)
-            .font(.subheadline)
+            }
 
             Spacer()
 
-            Toggle("Alerts", isOn: $notificationManager.notificationsEnabled)
-                .toggleStyle(.checkbox)
-                .font(.subheadline)
+            if updateChecker.updateAvailable, let url = updateChecker.releaseURL {
+                HoverTextButton(label: "Update Available") {
+                    NSWorkspace.shared.open(url)
+                }
+                .help("Open GitHub release page")
+            }
+
+            if locationMonitor.isTrackingEnabled {
+                HoverIconButton(icon: "map", hoverColor: .accentColor, action: { mapWindowController.showWindow() })
+                    .help("Show Map")
+            }
+            HoverIconButton(icon: "gear", hoverColor: .primary, action: { settingsWindowController.showWindow() })
+                .help("Settings")
+            HoverIconButton(icon: "power", hoverColor: .red, action: { NSApplication.shared.terminate(nil) })
+                .help("Exit Network Badge")
         }
     }
+}
 
-    // MARK: - Footer
+// MARK: - Hover helpers
 
-    /// Quit button and app info
-    private var footerSection: some View {
-        HStack {
-            Text("Measuring every \(Int(latencyMonitor.measurementInterval))s")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            Spacer()
-            Button(action: { NSApplication.shared.terminate(nil) }) {
-                Image(systemName: "power")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Exit Network Badge")
+private struct HoverIconButton: View {
+    let icon: String
+    let hoverColor: Color
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(isHovered ? hoverColor : .secondary)
+                .frame(width: 30, height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(Color.primary.opacity(isHovered ? 0.12 : 0.06))
+                )
         }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .animation(.easeInOut(duration: 0.12), value: isHovered)
+    }
+}
+
+private struct HoverTextButton: View {
+    let label: String
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.caption.weight(.medium))
+                .foregroundColor(isHovered ? .white : .accentColor)
+                .padding(.horizontal, 9)
+                .frame(height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(isHovered ? Color.accentColor : Color.accentColor.opacity(0.12))
+                )
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .animation(.easeInOut(duration: 0.12), value: isHovered)
     }
 }

@@ -25,13 +25,20 @@ NC='\033[0m'  # No Color
 
 echo -e "${GREEN}=== Building Network Badge ===${NC}"
 
-# ── Step 1: Compile in release mode ──────────────────────
-echo -e "${YELLOW}Compiling Swift code (release mode)...${NC}"
-swift build -c release
+# ── Step 1: Compile ──────────────────────────────────────
+if [ "${DEBUG:-}" = "1" ]; then
+    BUILD_CONFIG="debug"
+    echo -e "${YELLOW}Compiling Swift code (debug mode)...${NC}"
+    swift build -c debug
+else
+    BUILD_CONFIG="release"
+    echo -e "${YELLOW}Compiling Swift code (release mode)...${NC}"
+    swift build -c release
+fi
 
 # Find the compiled binary
-# Swift Package Manager puts it in .build/release/
-BINARY_PATH=".build/release/NetworkBadge"
+# Swift Package Manager puts it in .build/<config>/
+BINARY_PATH=".build/$BUILD_CONFIG/NetworkBadge"
 if [ ! -f "$BINARY_PATH" ]; then
     echo -e "${RED}Error: Binary not found at $BINARY_PATH${NC}"
     echo "Make sure 'swift build -c release' completed successfully."
@@ -91,14 +98,10 @@ fi
 # For local development, you can skip this.
 # For distribution, you need an Apple Developer account.
 
-if [ "${CODESIGN:-}" = "1" ]; then
-    IDENTITY="${CODESIGN_IDENTITY:-"-"}"  # "-" means ad-hoc signing
-    echo -e "${YELLOW}Code signing with identity: $IDENTITY${NC}"
-    codesign --force --deep --sign "$IDENTITY" "$APP_DIR"
-    echo -e "${GREEN}Code signing complete!${NC}"
-else
-    echo -e "${YELLOW}Skipping code signing (set CODESIGN=1 to enable)${NC}"
-fi
+IDENTITY="${CODESIGN_IDENTITY:-"-"}"  # "-" means ad-hoc signing
+echo -e "${YELLOW}Code signing with identity: $IDENTITY${NC}"
+codesign --force --deep --sign "$IDENTITY" "$APP_DIR"
+echo -e "${GREEN}Code signing complete!${NC}"
 
 # ── Done! ────────────────────────────────────────────────
 echo ""

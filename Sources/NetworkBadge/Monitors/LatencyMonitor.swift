@@ -37,10 +37,6 @@ final class LatencyMonitor: ObservableObject {
     /// Human-friendly quality rating based on current latency
     @Published var quality: LatencyQuality = .unknown
 
-    /// The quality level before the most recent change
-    /// (used by NotificationManager to detect degradation)
-    @Published var previousQuality: LatencyQuality = .unknown
-
     /// History of recent measurements (newest first, max 20)
     @Published var samples: [LatencySample] = []
 
@@ -49,22 +45,26 @@ final class LatencyMonitor: ObservableObject {
 
     // MARK: - Configuration
 
-    /// How often to measure latency (in seconds)
-    let measurementInterval: TimeInterval
+    /// How often to measure latency (in seconds), persisted across launches
+    @Published var measurementInterval: TimeInterval = 3.0 {
+        didSet {
+            UserDefaults.standard.set(measurementInterval, forKey: "pollInterval")
+            restartTimer()
+        }
+    }
+
+    /// The URL we ping to measure latency, persisted across launches
+    @Published var targetURL: URL = URL(string: "http://captive.apple.com/hotspot-detect.html")! {
+        didSet {
+            UserDefaults.standard.set(targetURL.absoluteString, forKey: "pollTarget")
+        }
+    }
 
     /// How long to wait before declaring a timeout (in seconds)
     let timeoutInterval: TimeInterval
 
     /// How many samples to keep in history
     let maxSampleCount: Int
-
-    /// The URL we ping to measure latency.
-    /// Apple's captive portal endpoint is ideal:
-    ///   - Tiny response (just "Success" text)
-    ///   - Works through captive portals
-    ///   - Globally distributed servers
-    ///   - Always available
-    let targetURL: URL
 
     // MARK: - Private Properties
 
@@ -90,14 +90,17 @@ final class LatencyMonitor: ObservableObject {
     ///   - timeout: Seconds before a request is considered timed out (default: 10)
     ///   - maxSamples: How many historical samples to keep (default: 20)
     init(
-        interval: TimeInterval = 3.0,
         timeout: TimeInterval = 10.0,
         maxSamples: Int = 20
     ) {
-        self.measurementInterval = interval
         self.timeoutInterval = timeout
         self.maxSampleCount = maxSamples
-        self.targetURL = URL(string: "http://captive.apple.com/hotspot-detect.html")!
+        let savedInterval = UserDefaults.standard.double(forKey: "pollInterval")
+        if savedInterval > 0 { self.measurementInterval = savedInterval }
+        if let saved = UserDefaults.standard.string(forKey: "pollTarget"),
+           let url = URL(string: saved) {
+            self.targetURL = url
+        }
     }
 
     // MARK: - Start / Stop
@@ -108,19 +111,30 @@ final class LatencyMonitor: ObservableObject {
         // Do an initial measurement right away
         measureLatency()
 
-        // Then schedule periodic measurements
-        timer = Timer.scheduledTimer(
-            withTimeInterval: measurementInterval,
-            repeats: true
-        ) { [weak self] _ in
-            self?.measureLatency()
-        }
+        // Then schedule periodic measurements on the main run loop
+        scheduleTimer()
     }
 
     /// Stop measuring. Call this when the app quits.
     func stop() {
         timer?.invalidate()
         timer = nil
+    }
+
+    /// Restarts the periodic timer with the current interval.
+    private func restartTimer() {
+        guard timer != nil else { return }  // not started yet
+        timer?.invalidate()
+        scheduleTimer()
+    }
+
+    /// Creates and schedules a repeating timer on the main run loop.
+    private func scheduleTimer() {
+        let t = Timer(timeInterval: measurementInterval, repeats: true) { [weak self] _ in
+            self?.measureLatency()
+        }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     // MARK: - Measurement
@@ -188,9 +202,6 @@ final class LatencyMonitor: ObservableObject {
             samples = Array(samples.prefix(maxSampleCount))
         }
 
-        // Save previous quality before updating (for change detection)
-        previousQuality = quality
-
         // Update current latency
         if sample.wasSuccessful {
             currentLatencyMs = sample.latencyMs
@@ -202,6 +213,29 @@ final class LatencyMonitor: ObservableObject {
 
         // Recalculate rolling average (only from successful samples)
         recalculateAverage()
+    }
+
+    // MARK: - ML Features
+
+    /// Standard deviation of latency from the last 10 successful samples.
+    /// More predictive than single latency; cellular has jitter spikes before dropouts.
+    /// Returns nil if fewer than 2 successful samples.
+    var jitter: Double? {
+        let recent = samples.prefix(10).filter { $0.wasSuccessful }
+        guard recent.count >= 2 else { return nil }
+        let mean = recent.reduce(0.0) { $0 + $1.latencyMs } / Double(recent.count)
+        let variance = recent.reduce(0.0) { $0 + ($1.latencyMs - mean) * ($1.latencyMs - mean) } / Double(recent.count)
+        return sqrt(variance)
+    }
+
+    /// Ratio of failed measurements in the last 10 samples (0-1).
+    /// Latency can look fine but packet loss kills usability.
+    /// Returns nil if no samples.
+    var packetLossRatio: Double? {
+        let recent = Array(samples.prefix(10))
+        guard !recent.isEmpty else { return nil }
+        let failed = recent.filter { !$0.wasSuccessful }.count
+        return Double(failed) / Double(recent.count)
     }
 
     /// Recalculates the average latency from successful samples.

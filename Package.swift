@@ -25,6 +25,12 @@ let package = Package(
             linkerSettings: [
                 // CoreWLAN: needed to read WiFi SSID and signal strength
                 .linkedFramework("CoreWLAN"),
+                // CoreLocation: needed for GPS tracking of network quality
+                .linkedFramework("CoreLocation"),
+                // MapKit: needed for the quality map view
+                .linkedFramework("MapKit"),
+                // SQLite3: needed for persistent quality record storage
+                .linkedLibrary("sqlite3"),
             ]
         ),
 

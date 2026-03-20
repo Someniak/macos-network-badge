@@ -16,6 +16,38 @@ A native macOS menu bar app that shows **live internet latency** and **connectio
 - Keeps a history of recent measurements so you can spot trends
 - Runs silently in the menu bar — no dock icon, no window
 
+## Optional Features
+
+Everything below is **off by default** and can be enabled in Settings. None of it is required — the core app works fine without any of these. But if you ride trains with questionable WiFi and want ammunition for a strongly-worded email to your favourite railway company, read on.
+
+### Smart Alerts
+
+Network Badge can notify you when things go wrong (or are about to). Each alert type is independently toggleable in Settings:
+
+| Alert | What it does | Default |
+|-------|-------------|---------|
+| **Latency degradation** | Notifies when quality drops to poor or bad | On |
+| **Connection lost** | Notifies when WiFi, Ethernet, or tethering disconnects entirely | Off |
+| **Rough connection ahead** | Predicts bad connectivity ~2 minutes ahead based on historical data from the same route | Off |
+
+"Rough connection ahead" requires GPS tracking (below) and enough historical data from previous trips. The more you ride, the smarter it gets.
+
+All alerts share a 30-second cooldown to avoid notification spam.
+
+### GPS Quality Tracking
+
+Enable GPS tracking to record *where* your connection was good or bad. This builds up a personal quality database (`~/.networkbadge/quality.db`) over time — handy for mapping dead zones on your commute or proving to NMBS/SNCB that their WiFi drops every single time between Bruxelles-Midi and Gent-Sint-Pieters.
+
+- **Quality map** — visual map with color-coded pins and an Uber-style trail
+- **Kalman-smoothed GPS** — filters out noisy readings for cleaner tracks
+- **GPS2IP support** — use your iPhone's GPS over WiFi/USB for better accuracy on Macs without GPS hardware
+- **IP geolocation fallback** — rough location from IP address when GPS is unavailable
+- **Data browser** — inspect stored measurements
+
+### Auto-Update Checker
+
+Periodically checks GitHub Releases for newer versions. No telemetry, no phoning home beyond a single GitHub API call.
+
 ## Requirements
 
 - **macOS 13 (Ventura)** or later
