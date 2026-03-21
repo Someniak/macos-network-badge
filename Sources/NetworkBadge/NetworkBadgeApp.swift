@@ -14,6 +14,7 @@
 //   6. Stores all measurements in ~/.networkbadge/ for future analysis
 // ---------------------------------------------------------
 
+#if os(macOS)
 import SwiftUI
 
 /// The main app. Uses SwiftUI's App protocol with MenuBarExtra
@@ -174,3 +175,4 @@ struct NetworkBadgeApp: App {
         }
     }
 }
+#endif

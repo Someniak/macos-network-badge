@@ -127,6 +127,11 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
         super.init()
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        #if os(iOS)
+        locationManager.allowsBackgroundLocationUpdates = true
+        locationManager.pausesLocationUpdatesAutomatically = false
+        locationManager.showsBackgroundLocationIndicator = true
+        #endif
         // Load persisted value. didSet is safe here because isInitializing
         // prevents it from starting location services before start() is called.
         if UserDefaults.standard.object(forKey: "gpsTrackingEnabled") != nil {

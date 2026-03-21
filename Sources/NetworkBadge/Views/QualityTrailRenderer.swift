@@ -11,6 +11,9 @@
 
 import MapKit
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 // MARK: - Trail Segment
 
@@ -87,7 +90,11 @@ struct QualityTrailBuilder {
 
 /// Polyline segment carrying its computed color for the renderer.
 final class QualityPolyline: MKPolyline {
+    #if os(iOS)
+    var color: UIColor = .systemGreen
+    #else
     var color: NSColor = .systemGreen
+    #endif
     var isBase: Bool = false
 }
 
@@ -98,10 +105,36 @@ final class LiveTrailPolyline: MKPolyline {
     var quality: LatencyQuality = .unknown
 }
 
-// MARK: - Trail Map View (NSViewRepresentable)
+// MARK: - Trail Map View
 
 /// An MKMapView wrapper that renders a smooth gradient quality trail
 /// and a live pulsing position marker.
+#if os(iOS)
+struct TrailMapView: UIViewRepresentable {
+    let records: [QualityRecord]
+    let segments: [TrailSegment]
+    let currentLatitude: Double?
+    let currentLongitude: Double?
+    let currentBearing: Double
+    @Binding var region: MKCoordinateRegion
+    @Binding var selectedRecord: QualityRecord?
+    var regionToken: Int = 0
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIView(context: Context) -> MKMapView {
+        let mapView = MKMapView()
+        mapView.delegate = context.coordinator
+        mapView.setRegion(region, animated: false)
+        return mapView
+    }
+
+    func updateUIView(_ mapView: MKMapView, context: Context) {
+        updateMapView(mapView, context: context)
+    }
+#else
 struct TrailMapView: NSViewRepresentable {
     let records: [QualityRecord]
     let segments: [TrailSegment]
@@ -110,7 +143,6 @@ struct TrailMapView: NSViewRepresentable {
     let currentBearing: Double
     @Binding var region: MKCoordinateRegion
     @Binding var selectedRecord: QualityRecord?
-    /// Incremented when a button programmatically changes the region
     var regionToken: Int = 0
 
     func makeCoordinator() -> Coordinator {
@@ -125,6 +157,13 @@ struct TrailMapView: NSViewRepresentable {
     }
 
     func updateNSView(_ mapView: MKMapView, context: Context) {
+        updateMapView(mapView, context: context)
+    }
+#endif
+
+    // MARK: - Shared Update Logic
+
+    func updateMapView(_ mapView: MKMapView, context: Context) {
         let coordinator = context.coordinator
         coordinator.parent = self
 
@@ -178,11 +217,20 @@ struct TrailMapView: NSViewRepresentable {
                 existing.coordinate = position
                 existing.bearing = currentBearing
                 if let view = mapView.view(for: existing) {
+                    #if os(iOS)
+                    let hostingController = UIHostingController(rootView: LivePositionMarker(bearing: currentBearing))
+                    hostingController.view.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
+                    hostingController.view.backgroundColor = .clear
+                    view.subviews.forEach { $0.removeFromSuperview() }
+                    view.addSubview(hostingController.view)
+                    view.bounds = CGRect(x: 0, y: 0, width: 44, height: 44)
+                    #else
                     let hostingView = NSHostingView(rootView: LivePositionMarker(bearing: currentBearing))
                     hostingView.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
                     view.subviews.forEach { $0.removeFromSuperview() }
                     view.addSubview(hostingView)
                     view.bounds = CGRect(x: 0, y: 0, width: 44, height: 44)
+                    #endif
                 }
             } else {
                 let live = LivePositionAnnotation()
@@ -373,6 +421,37 @@ struct TrailMapView: NSViewRepresentable {
         }
     }
 
+    #if os(iOS)
+    /// Map a quality score to a smooth UIColor gradient.
+    private func scoreToColor(_ score: Double) -> UIColor {
+        switch score {
+        case ..<1:
+            return interpolateColor(from: .systemGreen, to: .systemGreen, t: score)
+        case 1..<2:
+            return interpolateColor(from: .systemGreen, to: .systemYellow, t: score - 1)
+        case 2..<3:
+            return interpolateColor(from: .systemYellow, to: .systemOrange, t: score - 2)
+        case 3..<4:
+            return interpolateColor(from: .systemOrange, to: .systemRed, t: score - 3)
+        default:
+            return .systemRed
+        }
+    }
+
+    private func interpolateColor(from: UIColor, to: UIColor, t: Double) -> UIColor {
+        let t = max(0, min(1, t))
+        var fr: CGFloat = 0, fg: CGFloat = 0, fb: CGFloat = 0, fa: CGFloat = 0
+        var tr: CGFloat = 0, tg: CGFloat = 0, tb: CGFloat = 0, ta: CGFloat = 0
+        from.getRed(&fr, green: &fg, blue: &fb, alpha: &fa)
+        to.getRed(&tr, green: &tg, blue: &tb, alpha: &ta)
+        return UIColor(
+            red: fr + (tr - fr) * t,
+            green: fg + (tg - fg) * t,
+            blue: fb + (tb - fb) * t,
+            alpha: 0.85
+        )
+    }
+    #else
     /// Map a quality score to a smooth NSColor gradient.
     /// 0=green, 1=green→yellow, 2=yellow→orange, 3=orange→red, 4=red
     private func scoreToColor(_ score: Double) -> NSColor {
@@ -401,6 +480,7 @@ struct TrailMapView: NSViewRepresentable {
             alpha: 0.85
         )
     }
+    #endif
 
     // MARK: - Coordinator
 
@@ -426,7 +506,11 @@ struct TrailMapView: NSViewRepresentable {
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             if let liveLine = overlay as? LiveTrailPolyline {
                 let renderer = MKPolylineRenderer(polyline: liveLine)
+                #if os(iOS)
+                renderer.strokeColor = UIColor.systemBlue.withAlphaComponent(0.4)
+                #else
                 renderer.strokeColor = NSColor.systemBlue.withAlphaComponent(0.4)
+                #endif
                 renderer.lineWidth = 4
                 renderer.lineDashPattern = [8, 6]
                 renderer.lineCap = .round
@@ -468,12 +552,20 @@ struct TrailMapView: NSViewRepresentable {
             view.annotation = annotation
 
             let marker = LivePositionMarker(bearing: annotation.bearing)
+            #if os(iOS)
+            let hostingController = UIHostingController(rootView: marker)
+            hostingController.view.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
+            hostingController.view.backgroundColor = .clear
+            view.subviews.forEach { $0.removeFromSuperview() }
+            view.addSubview(hostingController.view)
+            view.frame = hostingController.view.frame
+            #else
             let hostingView = NSHostingView(rootView: marker)
             hostingView.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
-
             view.subviews.forEach { $0.removeFromSuperview() }
             view.addSubview(hostingView)
             view.frame = hostingView.frame
+            #endif
             view.centerOffset = CGPoint(x: 0, y: 0)
 
             return view

@@ -5,6 +5,7 @@
 // sorting, filtering, search, and CSV export.
 // ---------------------------------------------------------
 
+#if os(macOS)
 import AppKit
 import SwiftUI
 
@@ -338,3 +339,4 @@ struct DataBrowserView: View {
         return "Run \(run.id) — \(start)–\(end)"
     }
 }
+#endif

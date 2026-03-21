@@ -35,9 +35,14 @@ final class QualityDatabase {
         if let path = path {
             self.databasePath = path
         } else {
+            #if os(iOS)
+            let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+                .appendingPathComponent("NetworkBadge").path
+            #else
             let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
             let dir = "\(homeDir)/.networkbadge"
-            // Create the hidden directory if it doesn't exist
+            #endif
+            // Create the directory if it doesn't exist
             try? FileManager.default.createDirectory(
                 atPath: dir,
                 withIntermediateDirectories: true,

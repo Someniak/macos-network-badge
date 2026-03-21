@@ -10,6 +10,7 @@
 //   3. The window should float above other windows
 // ---------------------------------------------------------
 
+#if os(macOS)
 import AppKit
 import SwiftUI
 
@@ -137,3 +138,4 @@ final class MapWindowController: ObservableObject {
         isWindowVisible = false
     }
 }
+#endif

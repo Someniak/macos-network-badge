@@ -5,6 +5,7 @@
 // Follows the same pattern as MapWindowController.
 // ---------------------------------------------------------
 
+#if os(macOS)
 import AppKit
 import SwiftUI
 
@@ -89,3 +90,4 @@ final class DataBrowserWindowController: ObservableObject {
         isWindowVisible = false
     }
 }
+#endif

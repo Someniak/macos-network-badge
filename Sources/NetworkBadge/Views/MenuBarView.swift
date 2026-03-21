@@ -13,6 +13,7 @@
 //   - Quit button
 // ---------------------------------------------------------
 
+#if os(macOS)
 import SwiftUI
 
 /// The main popover view shown when the user clicks the menu bar item.
@@ -231,3 +232,4 @@ private struct HoverTextButton: View {
         .animation(.easeInOut(duration: 0.12), value: isHovered)
     }
 }
+#endif
