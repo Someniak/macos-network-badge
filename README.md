@@ -90,6 +90,11 @@ swift test
 | Network detection | `NWPathMonitor` (Network) | Detects WiFi, Ethernet, USB tethering |
 | WiFi details | `CoreWLAN` | Reads SSID and signal info |
 | Latency measurement | `URLSession` | HTTP ping to Apple's captive portal server |
+| GPS tracking | `CLLocationManager` | Records location for quality mapping |
+| Location smoothing | Kalman filter | Cleans noisy GPS for accurate trails |
+| Quality storage | `sqlite3` (WAL mode) | Append-only database of GPS-tagged measurements |
+| Quality map | `MapKit` | Color-coded trail visualization |
+| Smart alerts | `UserNotifications` | Degradation, disconnect, and predictive warnings |
 
 ### Why HTTP ping instead of ICMP?
 
@@ -102,25 +107,42 @@ swift test
 
 ```
 Sources/NetworkBadge/
-├── NetworkBadgeApp.swift           # App entry point, MenuBarExtra
+├── NetworkBadgeApp.swift              # App entry point, MenuBarExtra
 ├── Models/
-│   └── ConnectionInfo.swift        # Data types: ConnectionType, LatencyQuality
+│   ├── ConnectionInfo.swift           # Data types: ConnectionType, LatencyQuality
+│   ├── QualityRecord.swift            # GPS-tagged quality measurement
+│   └── RunDetector.swift              # Groups records into journeys
 ├── Monitors/
-│   ├── NetworkMonitor.swift        # NWPathMonitor + WiFi SSID reading
-│   └── LatencyMonitor.swift        # HTTP latency measurement loop
+│   ├── NetworkMonitor.swift           # NWPathMonitor + WiFi SSID reading
+│   ├── LatencyMonitor.swift           # HTTP latency measurement loop
+│   ├── LocationMonitor.swift          # GPS tracking + quality recording
+│   ├── LocationIntelligence.swift     # Kalman filtering, road snapping
+│   ├── GPS2IPSource.swift             # iPhone GPS over TCP (NMEA)
+│   ├── NotificationManager.swift      # Quality change alerts
+│   └── UpdateChecker.swift            # GitHub release polling
 ├── Views/
-│   └── MenuBarView.swift           # Popover UI with network details
+│   ├── MenuBarView.swift              # Main popover UI
+│   ├── SparklineView.swift            # Mini latency chart
+│   ├── QualityMapView.swift           # MapKit quality trail map
+│   ├── QualityTrailRenderer.swift     # Gradient polyline renderer
+│   ├── DataBrowserView.swift          # Record table + CSV export
+│   ├── SettingsView.swift             # App preferences
+│   ├── MapWindowController.swift      # Map window lifecycle
+│   ├── DataBrowserWindowController.swift
+│   └── SettingsWindowController.swift
+├── Storage/
+│   ├── QualityDatabase.swift          # Append-only SQLite database
+│   └── TileCache.swift                # Offline map tile cache
 └── Helpers/
-    └── NetworkInterfaceHelper.swift # Interface name → type detection
+    ├── NetworkInterfaceHelper.swift   # Interface name → type detection
+    └── CoordinateUtils.swift          # Haversine distance/bearing math
 
-Tests/NetworkBadgeTests/
-├── ConnectionInfoTests.swift       # Data model tests
-├── LatencyMonitorTests.swift       # Latency logic tests
-└── NetworkInterfaceHelperTests.swift # Interface detection tests
+Tests/NetworkBadgeTests/               # 10 test files
 
 scripts/
-├── build-app.sh                    # Compile + create .app bundle
-└── create-dmg.sh                   # Package into .dmg for distribution
+├── build-app.sh                       # Compile + create .app bundle
+├── create-dmg.sh                      # Package into .dmg for distribution
+└── install.sh                         # Build + install to /Applications
 ```
 
 ## Latency Quality Thresholds
@@ -137,4 +159,4 @@ These are tuned for typical European train WiFi and mobile hotspots.
 
 ## License
 
-MIT
+Apache 2.0 — see [LICENSE.txt](LICENSE.txt)
