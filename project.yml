@@ -1,0 +1,65 @@
+# ---------------------------------------------------------
+# project.yml — XcodeGen project specification for iOS
+#
+# Generates an Xcode project for the iOS app target.
+# The macOS target continues to use `swift build` / `swift run`.
+#
+# Usage:
+#   brew install xcodegen   # one-time
+#   xcodegen generate       # creates NetworkBadge.xcodeproj
+#
+# Or use: ./scripts/build-ios.sh (auto-generates if needed)
+# ---------------------------------------------------------
+
+name: NetworkBadge
+
+options:
+  bundleIdPrefix: com.networkbadge
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "15.0"
+  generateEmptyDirectories: false
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+
+targets:
+  NetworkBadgeIOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources/NetworkBadge
+        excludes:
+          # macOS-only files (entire file wrapped in #if os(macOS))
+          - Views/MenuBarView.swift
+          - Views/DataBrowserView.swift
+          - Views/DataBrowserWindowController.swift
+          - Views/MapWindowController.swift
+          - Views/SettingsView.swift
+          - Views/SettingsWindowController.swift
+          - NetworkBadgeApp.swift
+          # GPS2IP is macOS-only (iOS has native GPS)
+          - Monitors/GPS2IPSource.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.networkbadge.ios
+        PRODUCT_NAME: Network Badge
+        INFOPLIST_FILE: NetworkBadge-iOS/Info.plist
+        CODE_SIGN_ENTITLEMENTS: NetworkBadge-iOS/NetworkBadge.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"  # iPhone and iPad
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: false
+    info:
+      path: NetworkBadge-iOS/Info.plist
+    entitlements:
+      path: NetworkBadge-iOS/NetworkBadge.entitlements
+    resources:
+      - path: NetworkBadge-iOS/Assets.xcassets
+      - path: NetworkBadge-iOS/PrivacyInfo.xcprivacy
+    dependencies:
+      - framework: CoreLocation.framework
+        implicit: true
+      - framework: MapKit.framework
+        implicit: true
+      - sdk: libsqlite3.tbd

@@ -2,8 +2,11 @@
 # ---------------------------------------------------------
 # build-ios.sh — Build the iOS app
 #
-# Builds the NetworkBadge iOS app for simulator or device.
-# Requires Xcode 15+ with iOS 16+ SDK.
+# Generates an Xcode project via XcodeGen (if needed) and
+# builds the NetworkBadge iOS app for simulator or device.
+# Requires Xcode 15+ with iOS 16+ SDK and XcodeGen.
+#
+# Install XcodeGen:  brew install xcodegen
 #
 # Usage:
 #   ./scripts/build-ios.sh              # Build for simulator
@@ -13,16 +16,33 @@
 
 set -euo pipefail
 
-SCHEME="NetworkBadge"
+SCHEME="NetworkBadgeIOS"
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="$PROJECT_DIR/.build/ios"
+XCODEPROJ="$PROJECT_DIR/NetworkBadge.xcodeproj"
 
 cd "$PROJECT_DIR"
 
+# Generate Xcode project if missing or project.yml is newer
+generate_project() {
+    if ! command -v xcodegen &> /dev/null; then
+        echo "Error: XcodeGen not found. Install with: brew install xcodegen"
+        exit 1
+    fi
+
+    if [ ! -d "$XCODEPROJ" ] || [ "project.yml" -nt "$XCODEPROJ" ]; then
+        echo "Generating Xcode project from project.yml..."
+        xcodegen generate
+        echo "Generated $XCODEPROJ"
+    fi
+}
+
 case "${1:-simulator}" in
     simulator)
+        generate_project
         echo "Building for iOS Simulator..."
         xcodebuild build \
+            -project "$XCODEPROJ" \
             -scheme "$SCHEME" \
             -destination 'platform=iOS Simulator,name=iPhone 16' \
             -derivedDataPath "$BUILD_DIR" \
@@ -31,8 +51,10 @@ case "${1:-simulator}" in
         echo "Build complete. App at: $BUILD_DIR"
         ;;
     device)
+        generate_project
         echo "Building for iOS device..."
         xcodebuild build \
+            -project "$XCODEPROJ" \
             -scheme "$SCHEME" \
             -destination 'generic/platform=iOS' \
             -derivedDataPath "$BUILD_DIR" \
@@ -42,6 +64,7 @@ case "${1:-simulator}" in
     clean)
         echo "Cleaning iOS build artifacts..."
         rm -rf "$BUILD_DIR"
+        rm -rf "$XCODEPROJ"
         echo "Clean complete."
         ;;
     *)
