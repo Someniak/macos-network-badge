@@ -217,6 +217,10 @@ struct IOSSettingsView: View {
                 }
             }
             #endif
+
+            NavigationLink(destination: PrivacyPolicyView()) {
+                Text("Privacy Policy")
+            }
         }
     }
 }
