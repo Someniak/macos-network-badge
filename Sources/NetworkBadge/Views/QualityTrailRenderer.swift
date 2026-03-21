@@ -134,6 +134,7 @@ struct TrailMapView: UIViewRepresentable {
     func updateUIView(_ mapView: MKMapView, context: Context) {
         updateMapView(mapView, context: context)
     }
+}
 #else
 struct TrailMapView: NSViewRepresentable {
     let records: [QualityRecord]
@@ -159,7 +160,10 @@ struct TrailMapView: NSViewRepresentable {
     func updateNSView(_ mapView: MKMapView, context: Context) {
         updateMapView(mapView, context: context)
     }
+}
 #endif
+
+extension TrailMapView {
 
     // MARK: - Shared Update Logic
 
