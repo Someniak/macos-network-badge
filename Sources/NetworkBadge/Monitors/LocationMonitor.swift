@@ -35,13 +35,17 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
             UserDefaults.standard.set(isTrackingEnabled, forKey: "gpsTrackingEnabled")
             guard !isInitializing else { return }
             if isTrackingEnabled {
+                #if os(macOS)
                 if gps2ip.isEnabled { gps2ip.start() }
+                #endif
                 locationManager.requestWhenInUseAuthorization()
                 updateAuthorizationStatus()
             } else {
                 locationManager.stopUpdatingLocation()
                 cancelStationaryTimer()
+                #if os(macOS)
                 gps2ip.stop()
+                #endif
                 isTracking = false
             }
         }
@@ -114,8 +118,10 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     /// Guards against didSet side-effects during init
     private var isInitializing = true
 
-    /// GPS2IP iPhone GPS source
+    #if os(macOS)
+    /// GPS2IP iPhone GPS source (macOS only — iOS has native GPS)
     var gps2ip = GPS2IPSource()
+    #endif
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -127,6 +133,11 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
         super.init()
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        #if os(iOS)
+        locationManager.allowsBackgroundLocationUpdates = true
+        locationManager.pausesLocationUpdatesAutomatically = false
+        locationManager.showsBackgroundLocationIndicator = true
+        #endif
         // Load persisted value. didSet is safe here because isInitializing
         // prevents it from starting location services before start() is called.
         if UserDefaults.standard.object(forKey: "gpsTrackingEnabled") != nil {
@@ -151,6 +162,7 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
         self.networkMonitor = networkMonitor
         self.latencyMonitor = latencyMonitor
 
+        #if os(macOS)
         gps2ip.onLocation = { [weak self] location in
             DispatchQueue.main.async {
                 guard let self, self.isTracking else { return }
@@ -173,10 +185,13 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
                 else { self.gps2ip.stop() }
             }
             .store(in: &cancellables)
+        #endif
 
         guard isTrackingEnabled else { return }
 
+        #if os(macOS)
         if gps2ip.isEnabled { gps2ip.start() }
+        #endif
 
         // Request authorization (shows system prompt on first launch)
         locationManager.requestWhenInUseAuthorization()
@@ -189,7 +204,9 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
         locationManager.stopUpdatingLocation()
         cancelStationaryTimer()
         stopDeadReckoning()
+        #if os(macOS)
         gps2ip.stop()
+        #endif
         intelligence.flushOnStop()
         intelligence.resetKalman()
         currentLocation = nil
@@ -211,11 +228,13 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
 
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isTracking else { return }
+            #if os(macOS)
             // When GPS2IP is actively providing fixes, it gives far better
             // results than CoreLocation's Wi-Fi positioning. Skip CL updates
             // to avoid spider-web patterns from dual-source recording.
             // Falls back to CoreLocation if GPS2IP goes stale (>15s without fix).
             guard !self.gps2ip.isActivelyFixing else { return }
+            #endif
             self.latitude = location.coordinate.latitude
             self.longitude = location.coordinate.longitude
             self.currentLocation = location
@@ -359,6 +378,7 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
         }
     }
 
+    #if os(macOS)
     /// Records a GPS2IP location directly, skipping the Kalman / outlier / accuracy
     /// pipeline. iPhone GPS is already smooth and accurate; running it through the
     /// Wi-Fi-noise-oriented intelligence layer only drops good fixes.
@@ -402,6 +422,7 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
         currentStationaryInterval = minimumInterval
         scheduleStationaryPoll()
     }
+    #endif
 
     /// Buffer a latency-only record with no location (for later backpropagation).
     private func bufferLatencyOnlyRecord() {
@@ -544,6 +565,7 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
     private func performStationaryRecord() {
         guard isTracking, let rawLocation = currentLocation else { return }
 
+        #if os(macOS)
         // When GPS2IP is actively providing fixes, don't create CoreLocation-sourced
         // records — GPS2IP's own recordGPS2IP() handles recording with better accuracy.
         // Falls back to CoreLocation if GPS2IP goes stale (>15s without fix).
@@ -551,6 +573,7 @@ final class LocationMonitor: NSObject, ObservableObject, CLLocationManagerDelega
             scheduleStationaryPoll()
             return
         }
+        #endif
 
         let location = intelligence.kalmanSmooth(rawLocation)
         let (accept, source) = intelligence.shouldRecord(location: location)

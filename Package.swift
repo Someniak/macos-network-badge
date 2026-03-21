@@ -2,9 +2,15 @@
 // ---------------------------------------------------------
 // Package.swift — Swift Package Manager manifest
 //
-// This defines our macOS app as an executable Swift package.
-// Open this file in Xcode to build and run the app, or use
-// `swift build` from the command line.
+// This defines the app as an executable Swift package for both
+// macOS (menu bar app) and iOS (tab-based GPS tracking app).
+//
+// Both platforms share the same source directory and use
+// #if os(macOS) / #if os(iOS) for platform-specific code.
+//
+// Usage:
+//   macOS: swift build / swift run NetworkBadge
+//   iOS:   Open in Xcode, select iOS simulator/device target
 // ---------------------------------------------------------
 
 import PackageDescription
@@ -12,9 +18,10 @@ import PackageDescription
 let package = Package(
     name: "NetworkBadge",
 
-    // Requires macOS 13+ for SwiftUI's MenuBarExtra
+    // Requires macOS 13+ for MenuBarExtra, iOS 16+ for NavigationStack
     platforms: [
-        .macOS(.v13)
+        .macOS(.v13),
+        .iOS(.v16)
     ],
 
     targets: [
@@ -23,8 +30,8 @@ let package = Package(
             name: "NetworkBadge",
             path: "Sources/NetworkBadge",
             linkerSettings: [
-                // CoreWLAN: needed to read WiFi SSID and signal strength
-                .linkedFramework("CoreWLAN"),
+                // CoreWLAN: needed to read WiFi SSID and signal strength (macOS only)
+                .linkedFramework("CoreWLAN", .when(platforms: [.macOS])),
                 // CoreLocation: needed for GPS tracking of network quality
                 .linkedFramework("CoreLocation"),
                 // MapKit: needed for the quality map view

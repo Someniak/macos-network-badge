@@ -2,6 +2,7 @@
 // SettingsView.swift — Settings window content
 // ---------------------------------------------------------
 
+#if os(macOS)
 import AppKit
 import ServiceManagement
 import SwiftUI
@@ -315,3 +316,4 @@ struct SettingsView: View {
         .padding(.bottom, 8)
     }
 }
+#endif

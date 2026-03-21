@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Badge - Privacy Policy</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 700px;
+            margin: 40px auto;
+            padding: 0 20px;
+            color: #333;
+            line-height: 1.6;
+        }
+        h1 { font-size: 1.8em; }
+        h2 { font-size: 1.3em; margin-top: 1.5em; }
+        .updated { color: #666; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+    <h1>Network Badge &mdash; Privacy Policy</h1>
+    <p class="updated">Last updated: March 21, 2026</p>
+
+    <h2>Overview</h2>
+    <p>Network Badge is a network quality monitor designed for travelers. It records GPS-tagged network latency measurements so you can see where your internet connection was good or bad on a map.</p>
+    <p><strong>All data stays on your device.</strong> Network Badge has no servers, no cloud sync, no analytics, and no advertising.</p>
+
+    <h2>Data We Collect</h2>
+    <p>Network Badge records the following data locally on your device:</p>
+    <ul>
+        <li><strong>GPS location</strong> &mdash; Your precise coordinates at each measurement point. Used to map network quality along your route.</li>
+        <li><strong>Network quality metrics</strong> &mdash; Latency (ping time), connection type (WiFi, Cellular, etc.), success/failure of each measurement.</li>
+        <li><strong>WiFi network name (SSID)</strong> &mdash; The name of the WiFi network you're connected to, so you can identify which networks had good or poor quality.</li>
+        <li><strong>WiFi signal strength (RSSI)</strong> &mdash; Signal strength in dBm, when available.</li>
+        <li><strong>Speed and altitude</strong> &mdash; Estimated travel speed and GPS altitude, used for quality analysis and map rendering.</li>
+    </ul>
+
+    <h2>How Data Is Stored</h2>
+    <ul>
+        <li>All data is stored in a local SQLite database on your device.</li>
+        <li>On iOS: <code>Application Support/NetworkBadge/quality.db</code></li>
+        <li>On macOS: <code>~/.networkbadge/quality.db</code></li>
+        <li>Data is append-only by design &mdash; no automatic deletion.</li>
+    </ul>
+
+    <h2>Data Sharing</h2>
+    <p><strong>We never share your data with anyone.</strong> Specifically:</p>
+    <ul>
+        <li>No data is sent to our servers (we don't have servers).</li>
+        <li>No data is shared with third parties.</li>
+        <li>No advertising networks or analytics SDKs are included.</li>
+        <li>No user tracking or profiling of any kind.</li>
+    </ul>
+    <p>The only network requests the app makes are:</p>
+    <ul>
+        <li><strong>HTTP latency measurements</strong> &mdash; A small GET request to Apple's captive portal server (<code>captive.apple.com</code>) or a user-configured URL, to measure network latency. No personal data is sent.</li>
+        <li><strong>IP geolocation</strong> (optional, off by default) &mdash; A request to a public geolocation API to estimate your location when GPS is unavailable. Only your IP address is sent (inherent to the request).</li>
+        <li><strong>Update checks</strong> &mdash; Periodic checks to GitHub Releases to see if a new version is available. No personal data is sent.</li>
+    </ul>
+
+    <h2>Location Data</h2>
+    <p>Network Badge requests location permission to map network quality along your route. On iOS, the app may request "Always" location permission to continue recording in the background while you travel. You can change this at any time in Settings &rarr; Privacy &rarr; Location Services.</p>
+    <p>Location data is stored only on your device and is never transmitted.</p>
+
+    <h2>Data Export and Deletion</h2>
+    <ul>
+        <li><strong>Export:</strong> You can export your data as a CSV file at any time from the History tab.</li>
+        <li><strong>Delete:</strong> You can delete all data by removing the app. On macOS, delete the <code>~/.networkbadge/</code> directory.</li>
+    </ul>
+
+    <h2>Children's Privacy</h2>
+    <p>Network Badge does not knowingly collect data from children under 13. The app does not require an account and does not collect personal information.</p>
+
+    <h2>Changes to This Policy</h2>
+    <p>If we update this privacy policy, we will post the changes here and update the "Last updated" date above.</p>
+
+    <h2>Contact</h2>
+    <p>If you have questions about this privacy policy, please open an issue on our GitHub repository.</p>
+</body>
+</html>

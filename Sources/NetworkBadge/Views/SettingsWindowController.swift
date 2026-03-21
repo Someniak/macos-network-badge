@@ -5,6 +5,7 @@
 // Triggered from the menu bar popover via the gear button.
 // ---------------------------------------------------------
 
+#if os(macOS)
 import AppKit
 import SwiftUI
 
@@ -73,3 +74,4 @@ final class SettingsWindowController: ObservableObject {
         self.window = newWindow
     }
 }
+#endif

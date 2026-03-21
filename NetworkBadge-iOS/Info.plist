@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>Network Badge</string>
+	<key>CFBundleDisplayName</key>
+	<string>Network Badge</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.networkbadge.ios</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.0</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleExecutable</key>
+	<string>NetworkBadgeIOS</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+		<key>UIImageName</key>
+		<string>LaunchIcon</string>
+	</dict>
+
+	<!-- HTTPS-only (URLSession) — exempt from export compliance -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
+	<!-- Background location updates for continuous GPS tracking -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
+
+	<!-- Location permission strings -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Network Badge uses your location to map network quality along your route. This helps you see where connections were good or bad.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Network Badge tracks your location in the background to continuously record network quality while traveling on trains, in cars, or walking.</string>
+
+	<!-- Supported interface orientations -->
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+
+	<!-- Minimum iOS version -->
+	<key>MinimumOSVersion</key>
+	<string>16.0</string>
+
+	<!-- Allow arbitrary loads for HTTP latency testing -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

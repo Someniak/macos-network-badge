@@ -40,8 +40,10 @@ struct QualityMapView: View {
     /// Network monitor for connection info
     @ObservedObject var networkMonitor: NetworkMonitor
 
-    /// Controller for opening the data browser window
+    /// Controller for opening the data browser window (macOS only)
+    #if os(macOS)
     var dataBrowserController: DataBrowserWindowController?
+    #endif
 
     /// Current user location (from LocationMonitor, live-updating)
     private var currentLatitude: Double? { locationMonitor.latitude }
@@ -191,6 +193,7 @@ struct QualityMapView: View {
 
             Spacer()
 
+            #if os(macOS)
             // Data browser — opens the Excel-like record viewer
             if let controller = dataBrowserController {
                 Button(action: { controller.showWindow() }) {
@@ -199,6 +202,7 @@ struct QualityMapView: View {
                 .buttonStyle(.bordered)
                 .help("Browse all records")
             }
+            #endif
 
             // Center on user — only shown when GPS is active
             if currentLatitude != nil && currentLongitude != nil {
