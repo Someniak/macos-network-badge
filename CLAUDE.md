@@ -54,7 +54,7 @@ swift-format lint --recursive Sources/ Tests/
 - **SQLite (WAL mode)** — append-only storage for GPS-tagged quality records
 - **MapKit** — quality trail visualization with color-coded polylines
 - **UserNotifications** — alerts on quality degradation, connection loss, and predictive warnings
-- **@Observable pattern** — reactive data flow from monitors → UI
+- **ObservableObject + @Published pattern** — reactive data flow from monitors → UI
 
 ## Key Files
 
