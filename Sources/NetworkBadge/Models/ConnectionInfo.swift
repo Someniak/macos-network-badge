@@ -99,6 +99,31 @@ enum LatencyQuality: String, Equatable, Sendable {
     }
 }
 
+// MARK: - Quality Score Helpers
+
+/// Returns a SwiftUI Color for a 0-100 quality score.
+/// 80-100 green, 60-79 green, 40-59 yellow, 20-39 orange, 0-19 red
+func qualityScoreColor(_ score: Int) -> Color {
+    switch score {
+    case 80...:  return .green
+    case 60..<80: return .green
+    case 40..<60: return .yellow
+    case 20..<40: return .orange
+    default:      return .red
+    }
+}
+
+/// Returns a human label for a 0-100 quality score.
+func qualityScoreLabel(_ score: Int) -> String {
+    switch score {
+    case 80...:   return "Excellent"
+    case 60..<80: return "Good"
+    case 40..<60: return "Fair"
+    case 20..<40: return "Poor"
+    default:      return "Bad"
+    }
+}
+
 // MARK: - WiFi Signal Quality
 
 /// A human-friendly rating of WiFi signal strength based on RSSI (dBm).

@@ -47,6 +47,57 @@ final class LatencyMonitor: ObservableObject {
     /// Whether a measurement is currently in progress
     @Published var isMeasuring: Bool = false
 
+    /// Packet loss as a percentage (0-100) over the sample window.
+    /// Computed from the ratio of failed samples to total samples.
+    var packetLossPercent: Double {
+        guard !samples.isEmpty else { return 0.0 }
+        let failedCount = samples.filter { !$0.wasSuccessful }.count
+        return (Double(failedCount) / Double(samples.count)) * 100.0
+    }
+
+    /// Jitter in milliseconds — the average absolute difference between
+    /// consecutive successful latency measurements. High jitter means
+    /// unstable connection (bad for video calls even if avg latency is OK).
+    var jitterMs: Double? {
+        let successful = samples.reversed().filter { $0.wasSuccessful }
+        guard successful.count >= 2 else { return nil }
+
+        var totalDiff = 0.0
+        for i in 1..<successful.count {
+            totalDiff += abs(successful[i].latencyMs - successful[i - 1].latencyMs)
+        }
+        return totalDiff / Double(successful.count - 1)
+    }
+
+    /// Combined quality score from 0 (worst) to 100 (best).
+    /// Blends latency, packet loss, and jitter into one glanceable number.
+    var qualityScore: Int? {
+        guard !samples.isEmpty else { return nil }
+
+        // Latency component (0-100): 0ms→100, 300ms+→0
+        let latencyScore: Double
+        if let avg = averageLatencyMs {
+            latencyScore = max(0, 100.0 - (avg / 3.0))
+        } else {
+            latencyScore = 0  // all timeouts
+        }
+
+        // Packet loss component (0-100): 0%→100, 100%→0
+        let lossScore = 100.0 - packetLossPercent
+
+        // Jitter component (0-100): 0ms→100, 100ms+→0
+        let jitterScore: Double
+        if let jitter = jitterMs {
+            jitterScore = max(0, 100.0 - jitter)
+        } else {
+            jitterScore = latencyScore > 0 ? 100.0 : 0  // no jitter data = follow latency
+        }
+
+        // Weighted blend: latency 50%, loss 30%, jitter 20%
+        let score = latencyScore * 0.5 + lossScore * 0.3 + jitterScore * 0.2
+        return max(0, min(100, Int(score.rounded())))
+    }
+
     // MARK: - Configuration
 
     /// How often to measure latency (in seconds), persisted across launches

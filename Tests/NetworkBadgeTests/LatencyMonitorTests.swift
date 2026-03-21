@@ -196,4 +196,155 @@ final class LatencyMonitorTests: XCTestCase {
         XCTAssertEqual(monitor.timeoutInterval, 15.0)
         XCTAssertEqual(monitor.maxSampleCount, 50)
     }
+
+    // MARK: - Packet Loss
+
+    /// Packet loss should be 0% when all samples succeed
+    func testPacketLossAllSuccessful() {
+        let monitor = LatencyMonitor()
+        for latency in [30.0, 40.0, 50.0] {
+            monitor.recordSample(LatencySample(
+                timestamp: Date(), latencyMs: latency, wasSuccessful: true
+            ))
+        }
+        XCTAssertEqual(monitor.packetLossPercent, 0.0, accuracy: 0.01)
+    }
+
+    /// Packet loss should be 100% when all samples fail
+    func testPacketLossAllFailed() {
+        let monitor = LatencyMonitor()
+        for _ in 1...4 {
+            monitor.recordSample(LatencySample(
+                timestamp: Date(), latencyMs: 0, wasSuccessful: false
+            ))
+        }
+        XCTAssertEqual(monitor.packetLossPercent, 100.0, accuracy: 0.01)
+    }
+
+    /// Packet loss with mixed results
+    func testPacketLossMixed() {
+        let monitor = LatencyMonitor()
+        // 2 successful, 2 failed → 50%
+        monitor.recordSample(LatencySample(timestamp: Date(), latencyMs: 40, wasSuccessful: true))
+        monitor.recordSample(LatencySample(timestamp: Date(), latencyMs: 0, wasSuccessful: false))
+        monitor.recordSample(LatencySample(timestamp: Date(), latencyMs: 50, wasSuccessful: true))
+        monitor.recordSample(LatencySample(timestamp: Date(), latencyMs: 0, wasSuccessful: false))
+        XCTAssertEqual(monitor.packetLossPercent, 50.0, accuracy: 0.01)
+    }
+
+    /// Packet loss should be 0 with no samples
+    func testPacketLossEmpty() {
+        let monitor = LatencyMonitor()
+        XCTAssertEqual(monitor.packetLossPercent, 0.0)
+    }
+
+    // MARK: - Jitter
+
+    /// Jitter should be nil with fewer than 2 successful samples
+    func testJitterInsufficientSamples() {
+        let monitor = LatencyMonitor()
+        monitor.recordSample(LatencySample(
+            timestamp: Date(), latencyMs: 40.0, wasSuccessful: true
+        ))
+        XCTAssertNil(monitor.jitterMs)
+    }
+
+    /// Jitter should be nil with no samples
+    func testJitterEmpty() {
+        let monitor = LatencyMonitor()
+        XCTAssertNil(monitor.jitterMs)
+    }
+
+    /// Jitter with constant latency should be 0
+    func testJitterConstantLatency() {
+        let monitor = LatencyMonitor()
+        for _ in 1...5 {
+            monitor.recordSample(LatencySample(
+                timestamp: Date(), latencyMs: 50.0, wasSuccessful: true
+            ))
+        }
+        XCTAssertEqual(monitor.jitterMs!, 0.0, accuracy: 0.01)
+    }
+
+    /// Jitter with varying latency
+    func testJitterVaryingLatency() {
+        let monitor = LatencyMonitor()
+        // Samples: 40, 60, 40, 60
+        // Diffs: |60-40|=20, |40-60|=20, |60-40|=20
+        // Average jitter = 20
+        for latency in [40.0, 60.0, 40.0, 60.0] {
+            monitor.recordSample(LatencySample(
+                timestamp: Date(), latencyMs: latency, wasSuccessful: true
+            ))
+        }
+        XCTAssertEqual(monitor.jitterMs!, 20.0, accuracy: 0.01)
+    }
+
+    /// Jitter should skip failed samples
+    func testJitterIgnoresFailedSamples() {
+        let monitor = LatencyMonitor()
+        // Successful: 40, then fail, then 60 → jitter = |60-40| = 20
+        monitor.recordSample(LatencySample(timestamp: Date(), latencyMs: 40.0, wasSuccessful: true))
+        monitor.recordSample(LatencySample(timestamp: Date(), latencyMs: 0, wasSuccessful: false))
+        monitor.recordSample(LatencySample(timestamp: Date(), latencyMs: 60.0, wasSuccessful: true))
+        XCTAssertEqual(monitor.jitterMs!, 20.0, accuracy: 0.01)
+    }
+
+    // MARK: - Quality Score
+
+    /// Quality score should be nil with no samples
+    func testQualityScoreEmpty() {
+        let monitor = LatencyMonitor()
+        XCTAssertNil(monitor.qualityScore)
+    }
+
+    /// Excellent connection: low latency, no loss → score near 100
+    func testQualityScoreExcellent() {
+        let monitor = LatencyMonitor()
+        for latency in [10.0, 12.0, 11.0, 10.0, 13.0] {
+            monitor.recordSample(LatencySample(
+                timestamp: Date(), latencyMs: latency, wasSuccessful: true
+            ))
+        }
+        let score = monitor.qualityScore!
+        XCTAssertGreaterThanOrEqual(score, 85)
+        XCTAssertLessThanOrEqual(score, 100)
+    }
+
+    /// Terrible connection: high latency + packet loss → score near 0
+    func testQualityScoreTerrible() {
+        let monitor = LatencyMonitor()
+        // Mix of very high latency and timeouts
+        monitor.recordSample(LatencySample(timestamp: Date(), latencyMs: 400, wasSuccessful: true))
+        monitor.recordSample(LatencySample(timestamp: Date(), latencyMs: 0, wasSuccessful: false))
+        monitor.recordSample(LatencySample(timestamp: Date(), latencyMs: 0, wasSuccessful: false))
+        monitor.recordSample(LatencySample(timestamp: Date(), latencyMs: 500, wasSuccessful: true))
+        let score = monitor.qualityScore!
+        XCTAssertLessThanOrEqual(score, 25)
+    }
+
+    /// All timeouts should give score of 0
+    func testQualityScoreAllTimeouts() {
+        let monitor = LatencyMonitor()
+        for _ in 1...5 {
+            monitor.recordSample(LatencySample(
+                timestamp: Date(), latencyMs: 0, wasSuccessful: false
+            ))
+        }
+        XCTAssertEqual(monitor.qualityScore!, 0)
+    }
+
+    /// Score should be clamped to 0-100
+    func testQualityScoreClamped() {
+        let monitor = LatencyMonitor()
+        // Very low latency
+        for _ in 1...10 {
+            monitor.recordSample(LatencySample(
+                timestamp: Date(), latencyMs: 1.0, wasSuccessful: true
+            ))
+        }
+        let score = monitor.qualityScore!
+        XCTAssertGreaterThanOrEqual(score, 0)
+        XCTAssertLessThanOrEqual(score, 100)
+    }
 }

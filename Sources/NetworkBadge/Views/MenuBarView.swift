@@ -47,6 +47,9 @@ struct MenuBarView: View {
             // ── Latency Info + Sparkline ─────────────────
             latencySection
 
+            // ── Quality Stats (score, loss, jitter) ──────
+            statsRow
+
             SparklineView(samples: latencyMonitor.samples)
                 .frame(height: 60)
 
@@ -120,6 +123,53 @@ struct MenuBarView: View {
                 Text("avg \(Int(avg)) ms")
                     .font(.subheadline.monospacedDigit())
                     .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    // MARK: - Quality Stats Row
+
+    /// Shows quality score, packet loss, and jitter on one compact line.
+    private var statsRow: some View {
+        HStack(spacing: 12) {
+            // Quality score (0-100)
+            if let score = latencyMonitor.qualityScore {
+                HStack(spacing: 3) {
+                    Text("\(score)")
+                        .font(.system(.subheadline, design: .rounded).bold().monospacedDigit())
+                        .foregroundColor(qualityScoreColor(score))
+                    Text("/ 100")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            Spacer()
+
+            // Packet loss
+            if !latencyMonitor.samples.isEmpty {
+                HStack(spacing: 2) {
+                    Image(systemName: "xmark.circle")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Text(String(format: "%.0f%%", latencyMonitor.packetLossPercent))
+                        .font(.caption.monospacedDigit())
+                        .foregroundColor(latencyMonitor.packetLossPercent > 10 ? .orange : .secondary)
+                }
+                .help("Packet loss")
+            }
+
+            // Jitter
+            if let jitter = latencyMonitor.jitterMs {
+                HStack(spacing: 2) {
+                    Image(systemName: "waveform.path")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Text("±\(Int(jitter))ms")
+                        .font(.caption.monospacedDigit())
+                        .foregroundColor(jitter > 50 ? .orange : .secondary)
+                }
+                .help("Jitter")
             }
         }
     }

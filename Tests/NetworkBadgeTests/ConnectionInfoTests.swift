@@ -216,4 +216,22 @@ final class ConnectionInfoTests: XCTestCase {
     func testVeryWeakWiFiSignal() {
         XCTAssertEqual(WiFiSignalQuality.from(rssi: -100), .weak)
     }
+
+    // MARK: - Quality Score Helper Tests
+
+    func testQualityScoreColorMapping() {
+        XCTAssertEqual(qualityScoreColor(95), Color.green)
+        XCTAssertEqual(qualityScoreColor(70), Color.green)
+        XCTAssertEqual(qualityScoreColor(50), Color.yellow)
+        XCTAssertEqual(qualityScoreColor(30), Color.orange)
+        XCTAssertEqual(qualityScoreColor(10), Color.red)
+    }
+
+    func testQualityScoreLabelMapping() {
+        XCTAssertEqual(qualityScoreLabel(90), "Excellent")
+        XCTAssertEqual(qualityScoreLabel(65), "Good")
+        XCTAssertEqual(qualityScoreLabel(45), "Fair")
+        XCTAssertEqual(qualityScoreLabel(25), "Poor")
+        XCTAssertEqual(qualityScoreLabel(5), "Bad")
+    }
 }
